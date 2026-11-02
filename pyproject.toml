@@ -5,10 +5,18 @@ requires-python = ">=3.12"
 dependencies = ["pymupdf", "fastembed", "numpy", "typer", "python-dotenv", "httpx"]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "ruff"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]  # style errors, unused code, import order
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not eval'"
 markers = ["eval: retrieval evaluation against the indexed database (needs `ipsc ingest` first)"]
 
 [project.scripts]

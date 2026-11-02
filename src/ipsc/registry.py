@@ -1,15 +1,20 @@
-"""Derive document metadata from folder + (inexact) filename."""
+"""Document metadata comes from a `<file>.meta.json` sidecar next to each PDF:
+
+    {"doc_type": "rule", "discipline": ["Handgun"], "edition": "2026-01"}
+
+doc_type: rule | interpretation | manual. discipline: list (empty = applies to all).
+"""
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import FOLDER_TYPES
 
-MONTHS = {m: i for i, m in enumerate(
-    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
-_MON = r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?"
+MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+DOC_TYPES = ("rule", "interpretation", "manual")
 
-# Order matters: most specific first.
+# Order matters: most specific first. Used to spot disciplines in user questions.
 DISCIPLINES = [
     ("22LR Handgun", r"\.?22\s*lr(?:[\s\-_]*handgun)?"),
     ("Mini Rifle", r"mini[\s\-_]*rifle"),
@@ -19,6 +24,11 @@ DISCIPLINES = [
     ("Handgun", r"handgun"),
     ("Action Air", r"action[\s\-_]*air"),
 ]
+KNOWN_DISCIPLINES = [n for n, _ in DISCIPLINES]
+
+
+class MetaError(ValueError):
+    pass
 
 
 @dataclass
@@ -31,21 +41,10 @@ class DocMeta:
     edition_month: int = 0
     version: int = 1
     title: str = ""
-    date_source: str = "filename"  # "pdf" when the edition date was read from the PDF text
-    skip: str = ""  # reason the file is not ingested
 
     @property
     def edition_label(self) -> str:
-        if not self.edition_year:
-            return "unknown"
-        if not self.edition_month:
-            return str(self.edition_year)
-        name = [k for k, v in MONTHS.items() if v == self.edition_month][0].capitalize()
-        return f"{name} {self.edition_year}"
-
-    @property
-    def edition_key(self) -> tuple:
-        return (self.edition_year, self.edition_month, self.version)
+        return f"{MONTH_NAMES[self.edition_month - 1]} {self.edition_year}"
 
 
 def detect_disciplines(text: str) -> list:
@@ -58,57 +57,49 @@ def detect_disciplines(text: str) -> list:
     return found
 
 
-def detect_edition(text: str) -> tuple:
-    t = text.replace("_", " ").replace("-", " ")
-    # Prefer "<Mon> <Year> Edition" over issue dates like "Final 29 Dec 2025".
-    m = re.search(_MON + r"\s*(20\d\d)\s*edition", t, re.I)
+def sidecar_path(pdf: Path) -> Path:
+    return pdf.with_name(pdf.name + ".meta.json")
+
+
+def template(pdf: Path, root: Path) -> str:
+    """Best-guess sidecar content for a PDF that has none."""
+    rel = pdf.relative_to(root)
+    guess = next((FOLDER_TYPES[p.lower()] for p in rel.parts[:-1] if p.lower() in FOLDER_TYPES), "rule")
+    discs = detect_disciplines(pdf.stem) if guess == "rule" else []
+    return json.dumps({"doc_type": guess, "discipline": discs, "edition": "YYYY-MM"})
+
+
+def load_meta(pdf: Path, root: Path) -> DocMeta:
+    side = sidecar_path(pdf)
+    if not side.exists():
+        raise MetaError(f"missing {side.name}; create it, e.g. {template(pdf, root)}")
+    try:
+        raw = json.loads(side.read_text(encoding="utf-8-sig"))
+    except json.JSONDecodeError as e:
+        raise MetaError(f"{side.name}: invalid JSON ({e})")
+    doc_type = raw.get("doc_type")
+    if doc_type not in DOC_TYPES:
+        raise MetaError(f"{side.name}: doc_type must be one of {DOC_TYPES}")
+    discs = raw.get("discipline", [])
+    if isinstance(discs, str):
+        discs = [discs]
+    bad = [d for d in discs if d not in KNOWN_DISCIPLINES]
+    if bad or (doc_type == "rule" and not discs):
+        raise MetaError(f"{side.name}: discipline must be a non-empty list (rules) of {KNOWN_DISCIPLINES}"
+                        + (f"; unknown: {bad}" if bad else ""))
+    m = re.fullmatch(r"(\d{4})-(0[1-9]|1[0-2])", str(raw.get("edition", "")))
     if not m:
-        m = re.search(_MON + r"\s*(20\d\d)", t, re.I)
-    if m:
-        return int(m.group(2)), MONTHS[m.group(1).lower()[:3]]
-    m = re.search(r"(20\d\d)", t)
-    return (int(m.group(1)), 0) if m else (0, 0)
+        raise MetaError(f"{side.name}: edition must look like 2026-01")
+    return DocMeta(pdf, pdf.relative_to(root).as_posix(), doc_type, sorted(discs),
+                   int(m.group(1)), int(m.group(2)), 1, pdf.stem)
 
 
-def edition_from_pdf(doc) -> tuple:
-    """Edition (year, month) printed on the cover, e.g. 'JANUARY 2026 EDITION' or 'MAY 2026 INTERPRETATIONS'.
-
-    Returns (0, 0) when the PDF text carries no such statement.
-    """
-    text = " ".join(" ".join(doc[i].get_text().split()) for i in range(min(2, len(doc))))
-    m = re.search(_MON + r"\W{0,3}(20\d\d)\s*(?:edition|interpretations)", text, re.I)
-    if m:
-        return int(m.group(2)), MONTHS[m.group(1).lower()[:3]]
-    m = re.search(r"(20\d\d)\s*(?:edition|interpretations)", text, re.I)
-    return (int(m.group(1)), 0) if m else (0, 0)
-
-
-def classify(path: Path, root: Path) -> DocMeta | None:
-    rel = path.relative_to(root)
-    doc_type = None
-    for part in rel.parts[:-1]:
-        doc_type = FOLDER_TYPES.get(part.lower())
-        if doc_type:
-            break
-    if not doc_type:
-        return None
-    stem = path.stem
-    year, month = detect_edition(stem)
-    v = re.search(r"\bv(\d+)\b", stem, re.I)
-    discs = detect_disciplines(stem) if doc_type != "interpretation" else []
-    skip = ""
-    if doc_type == "rule" and re.search(r"combined|\d+\s*disciplines", stem, re.I):
-        skip = "combined multi-discipline rulebooks are not supported"
-    return DocMeta(path, rel.as_posix(), doc_type, discs, year, month,
-                   int(v.group(1)) if v else 1, stem, skip=skip)
-
-
-def scan(root: Path) -> list:
-    docs = []
+def scan(root: Path) -> tuple:
+    """Returns (docs with valid sidecars, [(rel_path, problem)])."""
+    docs, problems = [], []
     for p in sorted(root.rglob("*.pdf")):
-        if ".venv" in p.parts:
-            continue
-        d = classify(p, root)
-        if d:
-            docs.append(d)
-    return docs
+        try:
+            docs.append(load_meta(p, root))
+        except MetaError as e:
+            problems.append((p.relative_to(root).as_posix(), str(e)))
+    return docs, problems

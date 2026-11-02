@@ -1,273 +1,138 @@
-"""Query parsing (LLM) -> hybrid search (RAG) -> short LLM conclusion -> verbatim citations."""
+"""The question-answering pipeline. `ask()` reads like a recipe:
+
+    1. understand the question   (question.py, LLM)
+    2. search the rulebooks      (search.py, no LLM)
+    3. pick the evidence         (evidence.py)
+    4. write a short conclusion  (LLM, using prompts.ANSWER_SYS)
+    5. check the certainty       (certainty.py)
+
+Rule text is never produced by the LLM. The answer only lists *which* passages were used; the CLI then
+prints those passages verbatim from the database.
+"""
 import re
 from dataclasses import dataclass, field
+from typing import Callable
 
-from . import llm, search as srch
-from .registry import detect_disciplines
+from . import certainty, llm
+from . import search as search_module
+from .evidence import build_evidence, format_evidence
+from .prompts import ANSWER_SYS, DEFAULT_LABELS
+from .question import ParsedQuestion, parse_question
 
-MAX_EVIDENCE = 10
-MAX_RELATED = 4
-MAX_PASSAGE_CHARS = 1300
-MAX_TOTAL_CHARS = 11000  # keeps the prompt inside Groq's free 8k tokens-per-minute budget
-MIN_COVERAGE = 0.3
-TRANSLATE_SYS = ('Translate the IPSC shooting-sport question into English search keywords using official IPSC '
-                 'terminology. Respond with JSON only: {"search_query": "..."}')
-DISC_NAMES = ["Handgun", "22LR Handgun", "PCC", "Rifle", "Shotgun", "Mini Rifle", "Action Air"]
-
-PARSE_SYS = (
-    "You prepare search queries for an IPSC rulebook retrieval system. Respond with JSON only: "
-    '{"disciplines": [subset of ' + str(DISC_NAMES) + ' mentioned or clearly implied, else []], '
-    '"search_query": "English keywords and any rule numbers, using official IPSC terminology", '
-    '"question": "the question rephrased clearly in English", '
-    '"language": "English name of the language the user wrote in, e.g. English, German, Czech", '
-    '"intent": "changes if the user asks what changed/is new/differs between rulebook editions or versions, '
-    'otherwise answer", '
-    '"topic": "for intent changes only: the specific subject asked about (e.g. sight pictures), or empty '
-    'if they want all changes"}'
-)
-
-CHANGE_WORDS = re.compile(r"\b(chang\w*|differen\w*|what.?s new|updated?|new rules?|revised|revision)\b", re.I)
-EDITION_WORDS = re.compile(r"\b(rule ?books?|editions?|versions?|latest|recent|newest|compared|since)\b", re.I)
-
-
-GENERIC_TOPIC = re.compile(r"\b(rule ?books?|rules?|editions?|versions?|latest|recent|newest|ipsc|competition|"
-                           r"handgun|pcc|pistol caliber carbine|rifle|shotgun|mini rifle|22\s?lr|changes?|changed|new|"
-                           r"revisions?|revised|updates?|updated|modifications?|amendments?|differences?)\b", re.I)
-
-
-def clean_topic(topic: str) -> str:
-    """A topic that only names the rulebook/discipline means 'everything'."""
-    return "" if not GENERIC_TOPIC.sub(" ", topic or "").strip(" ,.-") else topic.strip()
-
-
-def looks_like_change_question(q: str) -> bool:
-    return bool(CHANGE_WORDS.search(q) and EDITION_WORDS.search(q))
-
-ANSWER_SYS = (
-    "You assist IPSC Range Officers. Answer ONLY from the numbered evidence passages. "
-    "Interpretations (type=interpretation) override rules; newer interpretations override older ones. "
-    "Never quote or invent rule text and never mention rules that are not in the evidence; refer to passages "
-    "by their id only. Rely only on passages whose wording directly addresses the question; do not stretch "
-    "unrelated passages or infer facts they do not state, and list weak ones under 'considered' or omit them. "
-    "If the evidence does not answer the question, say so and use certainty 'low'. "
-    "Certainty is 'high' only when a passage explicitly covers the exact situation described; if the situation "
-    "involves facts the passages do not mention (e.g. a different action than the one the rule names), "
-    "use 'medium' or 'low' and say what is missing. "
-    "LANGUAGE: the evidence is in English but the user may write in another language. Write short_answer, "
-    "reasoning, certainty_reason and every value of 'labels' in the language named in 'Answer language'. "
-    "Keep passage ids like [E2], rule numbers and the JSON keys unchanged. "
-    "Respond with JSON only: "
-    '{"short_answer": "1-2 sentence direct answer", '
-    '"reasoning": "A descriptive explanation of 3-6 sentences in plain prose: state which passages apply '
-    "(cite each as [E2] etc.), what each one says in your own words, how they combine (interpretations take "
-    "priority over rules), any exceptions or conditions, and the conclusion drawn. Never write only ids.\", "
-    '"used": ["E1", ...ids actually relied on], "considered": ["E5", ...ids relevant but not decisive], '
-    '"certainty": "high|medium|low", "certainty_reason": "one sentence", '
-    '"labels": {"short_answer": "Short answer", "reasoning": "Reasoning", '
-    '"rules_used": "Rules used (verbatim citations)", "rules_considered": "Rules considered", '
-    '"certainty": "Certainty level", "high": "HIGH", "medium": "MEDIUM", "low": "LOW"}} '
-    "The 'labels' values above are English: translate each one into the answer language "
-    "(keep them as they are only when the answer language is English)."
-)
-
-DEFAULT_LABELS = {"short_answer": "Short answer", "reasoning": "Reasoning",
-                  "rules_used": "Rules used (verbatim citations)", "rules_considered": "Rules considered",
-                  "certainty": "Certainty level", "high": "HIGH", "medium": "MEDIUM", "low": "LOW"}
+Log = Callable[[str], None]
 
 
 @dataclass
 class Answer:
-    interpretation: str = ""
+    short_answer: str = ""
     reasoning: str = ""
-    used: list = field(default_factory=list)
-    considered: list = field(default_factory=list)
-    certainty: str = "low"
+    used: list = field(default_factory=list)  # positions in the evidence list of passages relied on
+    considered: list = field(default_factory=list)  # positions of passages that were relevant, not decisive
+    certainty: str = certainty.LOW
     certainty_reason: str = ""
     disciplines: list = field(default_factory=list)
     search_query: str = ""
-    intent: str = "answer"
+    intent: str = "answer"  # "changes" means: hand over to the edition-comparison tool
     topic: str = ""
     language: str = "English"
-    labels: dict = field(default_factory=lambda: dict(DEFAULT_LABELS))
-    result: object = None
+    labels: dict = field(default_factory=lambda: dict(DEFAULT_LABELS))  # headings in the user's language
+    result: object = None  # the raw search result, for debugging
 
 
-def _evidence(res, per_rule_interps=3):
-    items, seen = [], set()
+def ask(con, question: str, discipline: str = "", top: int = 8, log: Log = lambda m: None) -> tuple:
+    """Answer one question. Returns (Answer, evidence); evidence[i] is the passage called [E{i+1}]."""
+    parsed = parse_question(question, discipline, log)
+    if parsed.intent == "changes":
+        return _changes_request(parsed), []
 
-    def add(h):
-        if h.id not in seen:
-            seen.add(h.id)
-            items.append(h)
-
-    for h in res.interpretations:
-        add(h)
-    for h in res.rules:
-        add(h)
-        for it in h.interpretations[:per_rule_interps]:
-            add(it)
-    for h in res.manuals:
-        add(h)
-    items = items[:MAX_EVIDENCE]
-    # Parent / sub-rules give context and exceptions; they fill the remaining budget.
-    for h in res.rules:
-        for r in h.related:
-            if len(items) >= MAX_EVIDENCE + MAX_RELATED:
-                break
-            if r.id not in seen:
-                seen.add(r.id)
-                r.cited_by = f"context for {h.ref}"
-                items.append(r)
-    out, used = [], 0
-    for h in items:
-        used += min(len(h.text), MAX_PASSAGE_CHARS)
-        if used > MAX_TOTAL_CHARS and out:
-            break
-        out.append(h)
-    return out
-
-
-def truncate(text: str, limit: int = None) -> str:
-    """Cut at a sentence boundary (or word boundary) instead of mid-sentence."""
-    limit = limit or MAX_PASSAGE_CHARS
-    if len(text) <= limit:
-        return text
-    cut = text[:limit]
-    m = max(cut.rfind(". "), cut.rfind("; "), cut.rfind(": "))
-    cut = cut[:m + 1] if m > limit * 0.5 else cut[:cut.rfind(" ")]
-    return cut + " [...]"
-
-
-def format_evidence(items) -> str:
-    out = []
-    for i, h in enumerate(items, 1):
-        scope = h.meta.get("scope", "") if h.doc_type == "interpretation" else ", ".join(h.disciplines)
-        note = f" NOTE={h.edition_note}" if h.edition_note else ""
-        if h.cited_by.startswith("context for"):
-            note += f" ({h.cited_by})"
-        out.append(f"[E{i}] type={h.doc_type} ref={h.ref} edition={h.edition_label} scope={scope}{note}\n"
-                   f"{h.title}\n{truncate(h.text)}")
-    return "\n\n".join(out)
-
-
-WORD = re.compile(r"[A-Za-z]{4,}")
-COMMON_EN = set("the and what that this with from have can are for not may when which shall must does".split())
-
-
-def looks_english(q: str) -> bool:
-    if re.search(r"[^\x00-\x7F]", q):
-        return False
-    words = re.findall(r"[a-z']+", q.lower())
-    return not words or sum(w in COMMON_EN or w in {"is", "a", "of", "to", "in", "it", "do", "i"} for w in words) >= 1
-
-
-def _terms(s: str) -> set:
-    return {w.lower()[:5] for w in WORD.findall(s) if w.lower() not in COMMON_EN | srch.STOP}
-
-
-def cap_certainty(cert: str, used_items, query: str) -> tuple:
-    """Code-side sanity check: HIGH needs a cited passage that really overlaps the question's key terms."""
-    if cert != "high":
-        return cert, ""
-    terms = _terms(query)
-    if not terms or not used_items:
-        return cert, ""
-    best = max(len(terms & _terms(h.title + " " + h.text)) / len(terms) for h in used_items)
-    if best < MIN_COVERAGE:
-        return "medium", f"downgraded: cited passages cover only {best:.0%} of the question's key terms"
-    return cert, ""
-
-
-def ask(con, question: str, discipline: str = "", top: int = 8, log=lambda m: None) -> tuple:
-    """Returns (Answer, evidence_items). evidence_items[i] corresponds to id E{i+1}."""
-    discs = detect_disciplines(discipline) if discipline else None
-    query = question
-    language = "English"
-    intent, topic = "answer", ""
-    try:
-        p = llm.complete_json(PARSE_SYS, question, log)
-        language = str(p.get("language") or "English").strip() or "English"
-        query = p.get("search_query") or p.get("question") or question
-        intent = "changes" if str(p.get("intent", "")).lower() == "changes" else "answer"
-        topic = clean_topic(str(p.get("topic") or ""))
-        if not discs:
-            discs = [d for d in p.get("disciplines", []) if d in DISC_NAMES] or detect_disciplines(question)
-    except llm.LLMError as e:
-        log(f"  query parsing skipped ({e}); using raw question")
-        discs = discs or detect_disciplines(question)
-        if looks_like_change_question(question):
-            intent = "changes"
-        if not looks_english(question):
-            language = "the same language as the question"
-            try:
-                query = str(llm.complete_json(TRANSLATE_SYS, question, log).get("search_query") or question)
-            except llm.LLMError:
-                log("  WARNING: could not translate the question to English; rules are English, "
-                    "so results may be poor. Try again later or ask in English.")
-
-    if intent == "changes":
-        return Answer(disciplines=discs or [], search_query=query, intent="changes", topic=topic,
-                      language=language), []
-
-    # Rules are English: a non-English question is searched only through its English translation.
-    english = language.lower().startswith("english")
-    res = srch.search(con, f"{question} {query}" if english and query != question else query, discs, top)
-    items = _evidence(res)
-    ans = Answer(disciplines=res.disciplines, search_query=query, language=language, result=res)
-    if not items:
-        ans.interpretation = "No relevant passages found in the indexed documents."
-        return ans, items
+    result = search_module.search(con, _search_text(question, parsed), parsed.disciplines, top)
+    evidence = build_evidence(result)
+    answer = Answer(disciplines=result.disciplines, search_query=parsed.search_query,
+                    language=parsed.language, result=result)
+    if not evidence:
+        answer.short_answer = "No relevant passages found in the indexed documents."
+        return answer, evidence
 
     try:
-        data = llm.complete_json(
-            ANSWER_SYS, f"Answer language: {language}\nQuestion: {question}\n\nEvidence:\n{format_evidence(items)}", log)
-    except llm.LLMError as e:
-        ans.interpretation = f"LLM unavailable ({e}). Showing retrieved passages only."
-        ans.considered = list(range(len(items)))
-        return ans, items
+        prompt = (f"Answer language: {parsed.language}\nQuestion: {question}\n\n"
+                  f"Evidence:\n{format_evidence(evidence)}")
+        data = llm.complete_json(ANSWER_SYS, prompt, log)
+    except llm.LLMError as error:
+        answer.short_answer = f"LLM unavailable ({error}). Showing retrieved passages only."
+        answer.considered = list(range(len(evidence)))
+        return answer, evidence
 
-    def ids(key):
-        out = []
-        for x in data.get(key, []) or []:
-            try:
-                n = int(str(x).lstrip("Ee")) - 1
-            except ValueError:
-                continue
-            if 0 <= n < len(items) and n not in out:
-                out.append(n)
-        return out
+    _fill_from_llm(answer, data, evidence, parsed)
+    return answer, evidence
 
-    def label(m):
-        n = int(m.group(1)) - 1
-        if not 0 <= n < len(items):
-            return m.group(0)
-        h = items[n]
-        if h.doc_type == "rule":
-            return f"Rule {h.ref}" if english else h.ref  # the answer text already carries the local word for "rule"
-        if h.doc_type == "interpretation":
-            return f"{h.ref} ({h.edition_label})"
-        return f"Manual {h.ref}"
 
-    def humanize(s):
-        s = re.sub(r"(?:\b(?:Rule|Interpretation)s?\s+)?\[?\bE(\d+)\b\]?", label, s)
-        s = re.sub(r"\b(Rule [\w.]+|Interpretation \d+ \([^)]*\))\s*\(\s*\1\s*\)", r"\1", s)
-        return re.sub(r"\(\s*(Rule [\w.]+|Interpretation \d+ \([^)]*\))\s*\)", r"(\1)", s)
+def _changes_request(parsed: ParsedQuestion) -> Answer:
+    return Answer(disciplines=parsed.disciplines, search_query=parsed.search_query, intent="changes",
+                  topic=parsed.topic, language=parsed.language)
 
-    ans.interpretation = humanize(str(data.get("short_answer") or data.get("interpretation", "")).strip())
-    ans.reasoning = humanize(str(data.get("reasoning", "")).strip())
-    ans.used = ids("used")
-    ans.considered = [i for i in ids("considered") if i not in ans.used]
-    cert = str(data.get("certainty", "low")).lower()
-    ans.certainty = cert if cert in ("high", "medium", "low") else "low"
-    ans.certainty_reason = humanize(str(data.get("certainty_reason", "")).strip())
+
+def _search_text(question: str, parsed: ParsedQuestion) -> str:
+    """English questions are searched with their own words plus the parsed keywords.
+
+    Rules are English, so a non-English question is searched only through its English keywords.
+    """
+    if parsed.is_english and parsed.search_query != question:
+        return f"{question} {parsed.search_query}"
+    return parsed.search_query
+
+
+def _fill_from_llm(answer: Answer, data: dict, evidence: list, parsed: ParsedQuestion) -> None:
+    """Copy the LLM's JSON into the Answer, converting passage ids like E2 into readable names."""
+    def readable(text: object) -> str:
+        return _humanize(str(text).strip(), evidence, parsed.is_english)
+
+    answer.short_answer = readable(data.get("short_answer") or "")
+    answer.reasoning = readable(data.get("reasoning") or "")
+    answer.used = _passage_numbers(data.get("used"), len(evidence))
+    answer.considered = [n for n in _passage_numbers(data.get("considered"), len(evidence))
+                         if n not in answer.used]
+    answer.certainty_reason = readable(data.get("certainty_reason") or "")
+
     labels = data.get("labels")
     if isinstance(labels, dict):
-        ans.labels.update({k: str(v).strip() for k, v in labels.items() if k in DEFAULT_LABELS and str(v).strip()})
-    # Without any cited evidence the conclusion cannot be trusted.
-    if not ans.used:
-        ans.certainty = "low"
-    else:
-        ans.certainty, why = cap_certainty(ans.certainty, [items[i] for i in ans.used], query)
-        if why:
-            ans.certainty_reason = f"{ans.certainty_reason} ({why})".strip()
-    return ans, items
+        answer.labels.update({key: str(value).strip() for key, value in labels.items()
+                              if key in DEFAULT_LABELS and str(value).strip()})
+
+    level = certainty.parse_level(data.get("certainty", certainty.LOW))
+    cited = [evidence[n] for n in answer.used]
+    answer.certainty, downgrade_reason = certainty.check_certainty(level, cited, parsed.search_query)
+    if downgrade_reason:
+        answer.certainty_reason = f"{answer.certainty_reason} ({downgrade_reason})".strip()
+
+
+def _passage_numbers(ids: object, count: int) -> list:
+    """['E2', 'E5'] -> [1, 4]. Ignores unknown or repeated ids."""
+    numbers = []
+    for item in ids or []:
+        try:
+            number = int(str(item).lstrip("Ee")) - 1
+        except ValueError:
+            continue
+        if 0 <= number < count and number not in numbers:
+            numbers.append(number)
+    return numbers
+
+
+def _humanize(text: str, evidence: list, english: bool) -> str:
+    """Replace passage ids such as [E2] by 'Rule 8.7.1' or 'Interpretation 1 (Oct 2025)'."""
+    def name(match: re.Match) -> str:
+        number = int(match.group(1)) - 1
+        if not 0 <= number < len(evidence):
+            return match.group(0)
+        hit = evidence[number]
+        if hit.doc_type == "rule":
+            # in other languages the answer text already carries the local word for "rule"
+            return f"Rule {hit.ref}" if english else hit.ref
+        if hit.doc_type == "interpretation":
+            return f"{hit.ref} ({hit.edition_label})"
+        return f"Manual {hit.ref}"
+
+    text = re.sub(r"(?:\b(?:Rule|Interpretation)s?\s+)?\[?\bE(\d+)\b\]?", name, text)
+    # tidy "Rule 8.7.1 (Rule 8.7.1)" and "(Rule 8.7.1)" produced by the replacement above
+    text = re.sub(r"\b(Rule [\w.]+|Interpretation \d+ \([^)]*\))\s*\(\s*\1\s*\)", r"\1", text)
+    return re.sub(r"\(\s*(Rule [\w.]+|Interpretation \d+ \([^)]*\))\s*\)", r"(\1)", text)

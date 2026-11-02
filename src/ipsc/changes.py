@@ -8,10 +8,12 @@ import json
 import re
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import numpy as np
 import typer
+
+from .config import source_link
+from .settings import CONTAIN_MIN, FUZZY_MIN, TOPK
 
 NUM = re.compile(r"\b\d{1,2}(?:\.\d{1,2}){1,5}\b")
 SPLIT_NUM = re.compile(r"(\d\.)\s+(?=\d)")
@@ -21,9 +23,8 @@ HEAD_NUM = re.compile(r"(?<![\d.])\d{1,2}\.(?=\s+[A-Z][a-z])")
 def _clean(text: str) -> str:
     """Repair rule numbers broken by PDF spacing, e.g. '10.5. 14' -> '10.5.14'."""
     return SPLIT_NUM.sub(r"\1", text.replace("\xad", ""))
-FUZZY_MIN = 0.55
-CONTAIN_MIN = 0.85
-TOPK = 6
+
+
 PLACEHOLDERS = {"not applicable", "intentionally blank", "intentionally left blank", "reserved", "deleted"}
 
 
@@ -42,7 +43,7 @@ class Version:
 
     @property
     def link(self) -> str:
-        return f"{Path(self.doc['path']).as_uri()}#page={self.page_pdf}"
+        return source_link(self.doc["path"], self.doc["rel_path"], self.page_pdf)
 
 
 @dataclass

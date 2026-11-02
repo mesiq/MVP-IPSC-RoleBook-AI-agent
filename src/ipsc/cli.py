@@ -77,9 +77,10 @@ def ask(question: str = typer.Argument(..., help="Your question"),
         top: int = typer.Option(8, help="Max direct hits"),
         debug: bool = typer.Option(False, help="Show parsed query and discipline")):
     """Answer a question: LLM parses it, RAG finds the rules, LLM summarises; citations are verbatim."""
-    from . import answer as ans_mod
+    from . import answer as answer_module
+    from .render import print_answer
     con = store.connect()
-    a, items = ans_mod.ask(con, question, discipline, top, log=typer.echo)
+    a, items = answer_module.ask(con, question, discipline, top, log=typer.echo)
     if a.intent == "changes":
         from . import changes as chg
         typer.echo(f"Detected a 'what changed' question - comparing rulebook editions "
@@ -92,29 +93,7 @@ def ask(question: str = typer.Argument(..., help="Your question"),
         return
     if debug:
         typer.echo(f"[debug] disciplines={a.disciplines} query={a.search_query!r}")
-
-    def cite(i):
-        h = items[i]
-        kind = {"interpretation": "", "manual": "Manual "}.get(h.doc_type, "Rule ")
-        label = f"{h.ref}: {h.title}" if h.doc_type != "rule" else h.ref
-        typer.echo(f"- {kind}{label}  [{h.edition_label}, p.{h.page_label}]")
-        typer.echo(f"    \"{h.text}\"")
-        typer.echo(f"    source: {h.link}")
-        if h.edition_note:
-            typer.echo(f"    note: {h.edition_note}")
-    L = a.labels
-    typer.echo(f"\n{L['short_answer']}:\n{a.interpretation}\n")
-    if a.reasoning:
-        typer.echo(f"{L['reasoning']}:\n{a.reasoning}\n")
-    typer.echo(f"{L['rules_used']}:")
-    for i in a.used:
-        cite(i)
-    if a.considered:
-        typer.echo(f"\n{L['rules_considered']}:")
-        for i in a.considered:
-            cite(i)
-    typer.echo(f"\n{L['certainty']}: {L.get(a.certainty, a.certainty.upper())}"
-               + (f" - {a.certainty_reason}" if a.certainty_reason else ""))
+    print_answer(a, items, typer.echo)
 
 
 @app.command()

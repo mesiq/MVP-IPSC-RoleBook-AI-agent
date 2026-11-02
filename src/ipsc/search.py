@@ -2,18 +2,19 @@
 import json
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import numpy as np
 
 from . import embed
+from .config import source_link
 from .registry import detect_disciplines
+from .settings import MAX_SUBRULES, POOL, RELATED_FOR, RRF_K, TIER_BOOST
 
-RRF_K = 60
-POOL = 60
-# Interpretations override rules; manuals are guidance only.
-TIER_BOOST = {3: 1.5, 2: 1.0, 1: 0.7}
-STOP = set("a an and are as at be by can do does for from has have how i if in is it of on or the to what when where which who with".split())
+# Common words ignored by the keyword search.
+STOP = set(
+    "a an and are as at be by can do does for from has have how i if in is it of on or the to what when "
+    "where which who with".split())
+# A rule number such as 8.7.1 typed by the user.
 RULE_NO = re.compile(r"\b\d{1,2}(?:\.\d{1,2}){1,5}\b")
 
 
@@ -42,7 +43,7 @@ class Hit:
 
     @property
     def link(self) -> str:
-        return f"{Path(self.path).as_uri()}#page={self.page_pdf}"
+        return source_link(self.path, self.rel_path, self.page_pdf)
 
 
 @dataclass
@@ -184,8 +185,6 @@ def _collapse_duplicates(ranked: list) -> list:
 
 
 DISC_PRIORITY = ["Handgun", "PCC", "Rifle", "Shotgun", "Mini Rifle", "22LR Handgun", "Action Air"]
-RELATED_FOR = 3
-MAX_KIDS = 3
 
 
 def search(con, query: str, disciplines: list = None, top_k: int = 8) -> Result:
@@ -270,7 +269,7 @@ def _related(con, rule: Hit) -> list:
         refs.append(rule.ref.rsplit(".", 1)[0])
     kids = [r[0] for r in con.execute(
         "SELECT ref FROM chunks WHERE doc_id=? AND ref LIKE ? ORDER BY id", (doc["id"], rule.ref + ".%"))]
-    refs += [k for k in kids if k.count(".") == rule.ref.count(".") + 1][:MAX_KIDS]
+    refs += [k for k in kids if k.count(".") == rule.ref.count(".") + 1][:MAX_SUBRULES]
     out = []
     for ref in refs:
         row = con.execute("SELECT id FROM chunks WHERE doc_id=? AND ref=? ORDER BY id LIMIT 1",

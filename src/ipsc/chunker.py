@@ -61,24 +61,24 @@ def page_lines(page) -> list:
         blocks = page.get_text("rawdict")["blocks"]
     else:
         blocks = page.get_text("dict")["blocks"]
-    for b in blocks:
-        for l in b.get("lines", []):
+    for block in blocks:
+        for pdf_line in block.get("lines", []):
             if strikes:
-                t = "".join(c["c"] for s in l["spans"] for c in s["chars"]
+                t = "".join(c["c"] for s in pdf_line["spans"] for c in s["chars"]
                             if not _char_struck(c["bbox"], strikes))
             else:
-                t = "".join(s["text"] for s in l["spans"])
+                t = "".join(s["text"] for s in pdf_line["spans"])
             t = t.replace("\xa0", " ").strip()
             if t:
-                out.append(Line(l["bbox"][0], l["bbox"][1], t))
-    out.sort(key=lambda l: (round(l.y0), l.x0))
+                out.append(Line(pdf_line["bbox"][0], pdf_line["bbox"][1], t))
+    out.sort(key=lambda line: (round(line.y0), line.x0))
     return out, h
 
 
 def is_toc(lines) -> bool:
     if not lines:
         return False
-    dots = sum(1 for l in lines if re.search(r"\.{5,}", l.text))
+    dots = sum(1 for line in lines if re.search(r"\.{5,}", line.text))
     return dots / len(lines) > 0.25
 
 
@@ -86,14 +86,14 @@ def strip_page_furniture(lines, height):
     """Remove running headers, footers and page numbers; return (lines, label)."""
     label = ""
     kept = []
-    for l in lines:
-        top, bottom = l.y0 < height * 0.08, l.y0 > height * 0.93
-        if (top or bottom) and (HEADER.match(l.text) or FOOTER.search(l.text)):
+    for line in lines:
+        top, bottom = line.y0 < height * 0.08, line.y0 > height * 0.93
+        if (top or bottom) and (HEADER.match(line.text) or FOOTER.search(line.text)):
             continue
-        if (top or bottom) and ROMAN.match(l.text):
-            label = l.text
+        if (top or bottom) and ROMAN.match(line.text):
+            label = line.text
             continue
-        kept.append(l)
+        kept.append(line)
     return kept, label
 
 
@@ -142,11 +142,11 @@ def chunk_numbered(doc: pymupdf.Document) -> list:
         lines, label = strip_page_furniture(lines, h)
         if not lines:
             continue
-        margin = min(l.x0 for l in lines)
-        for l in lines:
-            txt = SPLIT_ID.sub(r"\1.\2", l.text)
+        margin = min(line.x0 for line in lines)
+        for line in lines:
+            txt = SPLIT_ID.sub(r"\1.\2", line.text)
             m_ch, m_ap = CHAPTER.match(txt), APPENDIX.match(txt)
-            m_id = RULE_ID.match(txt) if l.x0 <= margin + 100 else None
+            m_id = RULE_ID.match(txt) if line.x0 <= margin + 100 else None
             if m_id and m_id.group(2) and not re.match(r"[A-Z(\"“]", m_id.group(2)):
                 m_id = None  # e.g. wrapped "1.5 meters ..." is not a rule number
             if m_ch:
@@ -176,14 +176,14 @@ def chunk_numbered(doc: pymupdf.Document) -> list:
 def _manual_lines(page):
     out = []
     for b in page.get_text("dict")["blocks"]:
-        for l in b.get("lines", []):
-            sp = [s for s in l["spans"] if s["text"].strip()]
+        for pdf_line in b.get("lines", []):
+            sp = [s for s in pdf_line["spans"] if s["text"].strip()]
             if not sp:
                 continue
             text = "".join(s["text"] for s in sp).replace("\xa0", " ").strip()
             bold = all((s["flags"] & 16) or "bold" in s["font"].lower() for s in sp)
             big = max(s["size"] for s in sp) >= 13
-            out.append((text, bold or big, l["bbox"][1]))
+            out.append((text, bold or big, pdf_line["bbox"][1]))
     return out
 
 
@@ -245,8 +245,8 @@ def chunk_interpretations(doc: pymupdf.Document) -> list:
     flat = []  # (text or "" for blank, pdf page)
     for pno, page in enumerate(doc, 1):
         for b in page.get_text("dict")["blocks"]:
-            for l in b.get("lines", []):
-                flat.append(("".join(s["text"] for s in l["spans"]).replace("\xa0", " ").strip(), pno))
+            for pdf_line in b.get("lines", []):
+                flat.append(("".join(s["text"] for s in pdf_line["spans"]).replace("\xa0", " ").strip(), pno))
     items, cur = [], None
     for text, pno in flat:
         if INTERP_NO.match(text):
