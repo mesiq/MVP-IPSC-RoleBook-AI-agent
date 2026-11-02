@@ -32,6 +32,13 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
     return con
 
 
+def connect_readonly(path: Path = DB_PATH) -> sqlite3.Connection:
+    """Read-only connection for the web app (cheap, never changes the schema)."""
+    con = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+    con.row_factory = sqlite3.Row
+    return con
+
+
 def delete_doc(con, path: str):
     r = con.execute("SELECT id FROM docs WHERE path=?", (path,)).fetchone()
     if r:

@@ -24,3 +24,10 @@ MIN_COVERAGE = 0.3
 FUZZY_MIN = 0.55  # Minimum similarity to treat two rules from different editions as the same rule.
 CONTAIN_MIN = 0.85  # Share of an old rule contained in a new one to count a split or merge.
 TOPK = 6  # Embedding neighbours examined when looking for the matching rule.
+
+# --- Web app (web/) -------------------------------------------------------------------------------
+MAX_QUESTION_CHARS = 500  # Longer questions are rejected.
+RATE_LIMIT_REQUESTS = 12  # Per visitor (IP address) ...
+RATE_LIMIT_WINDOW_SECONDS = 60  # ... per this many seconds, for the endpoints that call the LLM.
+MAX_PARALLEL_JOBS = 2  # Questions / comparisons processed at the same time (2 vCPUs, free LLM quota).
+QUEUE_WAIT_SECONDS = 25  # A request waits this long for a free slot, then gets a "busy" message.

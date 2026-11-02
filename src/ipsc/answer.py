@@ -34,6 +34,7 @@ class Answer:
     search_query: str = ""
     intent: str = "answer"  # "changes" means: hand over to the edition-comparison tool
     topic: str = ""
+    scope: str = "all"  # for intent "changes": "latest" or "all" editions
     language: str = "English"
     labels: dict = field(default_factory=lambda: dict(DEFAULT_LABELS))  # headings in the user's language
     result: object = None  # the raw search result, for debugging
@@ -68,7 +69,7 @@ def ask(con, question: str, discipline: str = "", top: int = 8, log: Log = lambd
 
 def _changes_request(parsed: ParsedQuestion) -> Answer:
     return Answer(disciplines=parsed.disciplines, search_query=parsed.search_query, intent="changes",
-                  topic=parsed.topic, language=parsed.language)
+                  topic=parsed.topic, scope=parsed.scope, language=parsed.language)
 
 
 def _search_text(question: str, parsed: ParsedQuestion) -> str:

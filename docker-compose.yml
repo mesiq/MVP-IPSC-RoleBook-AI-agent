@@ -1,0 +1,32 @@
+# Public site: Caddy (automatic HTTPS) in front of the app.
+#   1. put your PDFs + .meta.json files in ./source_data and the keys in ./.env
+#   2. docker compose run --rm app ipsc ingest
+#   3. IPSC_DOMAIN=rules.example.com docker compose up -d
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./source_data:/app/source_data
+      - ./data:/app/data
+      - ./cache:/app/cache
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      IPSC_DOMAIN: ${IPSC_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+
+volumes:
+  caddy_data:

@@ -1,0 +1,32 @@
+{% macro citation(c) %}
+<article class="citation">
+  <h4>
+    {% if c.kind == "rule" %}Rule {{ c.ref }}{% elif c.kind == "manual" %}Manual {{ c.ref }}{% else %}{{ c.ref }}: {{ c.title }}{% endif %}
+    <span class="meta">{{ c.edition }}, p.{{ c.page }}</span>
+  </h4>
+  {% if c.section %}<p class="meta">Section: {{ c.section }}</p>{% endif %}
+  <blockquote>{{ c.text }}</blockquote>
+  {% if c.note %}<p class="note">Note: {{ c.note }}</p>{% endif %}
+  <a class="source" href="{{ c.link }}" target="_blank" rel="noopener">Open source PDF</a>
+</article>
+{% endmacro %}
+
+{% set labels = result.labels %}
+<div class="answer">
+  <h2>{{ labels.short_answer }}</h2>
+  <p>{{ result.short_answer }}</p>
+  {% if result.reasoning %}
+    <h2>{{ labels.reasoning }}</h2>
+    <p>{{ result.reasoning }}</p>
+  {% endif %}
+  <h2>{{ labels.rules_used }}</h2>
+  {% for c in result.used %}{{ citation(c) }}{% else %}<p class="muted">&mdash;</p>{% endfor %}
+  {% if result.considered %}
+    <h2>{{ labels.rules_considered }}</h2>
+    {% for c in result.considered %}{{ citation(c) }}{% endfor %}
+  {% endif %}
+  <p class="certainty level-{{ result.certainty }}">
+    <strong>{{ labels.certainty }}:</strong> {{ labels.get(result.certainty, result.certainty | upper) }}
+    {% if result.certainty_reason %}<span class="muted"> &ndash; {{ result.certainty_reason }}</span>{% endif %}
+  </p>
+</div>

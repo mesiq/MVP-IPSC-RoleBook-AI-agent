@@ -39,6 +39,7 @@ class Hit:
     edition_note: str = ""
     related: list = field(default_factory=list)
     also_in: list = field(default_factory=list)
+    context: str = ""  # chapter and section headings the rule sits under, e.g. "... > 10.5 Disqualification - ..."
     _norm: str = ""
 
     @property
@@ -93,27 +94,40 @@ def _fts_rank(con, q, ids):
     return [r[0] for r in rows]
 
 
-def _vec_rank(con, q, ids):
+_vector_cache: dict = {}  # (doc ids, chunk count) -> (chunk ids, matrix); saves re-reading ~10 MB per question
+
+
+def _vector_matrix(con, ids):
     ph = ",".join("?" * len(ids))
-    rows = con.execute(f"SELECT id, embedding FROM chunks WHERE doc_id IN ({ph}) AND embedding IS NOT NULL",
-                       ids).fetchall()
-    if not rows:
+    count, newest = con.execute("SELECT COUNT(*), MAX(id) FROM chunks").fetchone()
+    key = (tuple(ids), count, newest)
+    if key not in _vector_cache:
+        rows = con.execute(f"SELECT id, embedding FROM chunks WHERE doc_id IN ({ph}) AND embedding IS NOT NULL",
+                           ids).fetchall()
+        matrix = np.vstack([np.frombuffer(r["embedding"], dtype=np.float32) for r in rows]) if rows else None
+        _vector_cache.clear()  # keep only the latest selection
+        _vector_cache[key] = ([r["id"] for r in rows], matrix)
+    return _vector_cache[key]
+
+
+def _vec_rank(con, q, ids):
+    chunk_ids, matrix = _vector_matrix(con, ids)
+    if matrix is None:
         return []
-    mat = np.vstack([np.frombuffer(r["embedding"], dtype=np.float32) for r in rows])
-    sims = mat @ embed.embed_query(q)
-    order = np.argsort(-sims)[:POOL]
-    return [rows[i]["id"] for i in order]
+    sims = matrix @ embed.embed_query(q)
+    return [chunk_ids[i] for i in np.argsort(-sims)[:POOL]]
 
 
 def _load(con, ids) -> dict:
     ph = ",".join("?" * len(ids))
     rows = con.execute(
-        f"SELECT c.id, c.ref, c.title, c.text, c.page_pdf, c.page_label, c.meta, d.doc_type, d.tier, "
+        f"SELECT c.id, c.ref, c.title, c.text, c.page_pdf, c.page_label, c.meta, c.context, d.doc_type, d.tier, "
         f"d.rel_path, d.path, d.edition_label, d.disciplines, d.edition_year, d.edition_month "
         f"FROM chunks c JOIN docs d ON d.id=c.doc_id WHERE c.id IN ({ph})", list(ids)).fetchall()
     return {r["id"]: Hit(r["id"], r["ref"], r["title"], r["text"], r["page_pdf"], r["page_label"],
                          r["doc_type"], r["tier"], r["rel_path"], r["path"], r["edition_label"],
-                         json.loads(r["disciplines"]), json.loads(r["meta"] or "{}")) for r in rows}
+                         json.loads(r["disciplines"]), json.loads(r["meta"] or "{}"), context=r["context"] or "")
+            for r in rows}
 
 
 def _applies(interp: Hit, disciplines: list, rule_disciplines: list = None) -> bool:

@@ -2,7 +2,8 @@
 name = "ipsc-rulebook-agent"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["pymupdf", "fastembed", "numpy", "typer", "python-dotenv", "httpx"]
+dependencies = ["pymupdf", "fastembed", "numpy", "typer", "python-dotenv", "httpx",
+                "fastapi", "uvicorn", "jinja2", "python-multipart"]
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
@@ -21,6 +22,7 @@ markers = ["eval: retrieval evaluation against the indexed database (needs `ipsc
 
 [project.scripts]
 ipsc = "ipsc.cli:app"
+ipsc-web = "ipsc.web.app:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -28,3 +30,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"ipsc.web" = ["templates/*.html", "static/*"]

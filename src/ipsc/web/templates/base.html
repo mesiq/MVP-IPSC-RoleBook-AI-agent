@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="htmx-config" content='{"includeIndicatorStyles": false}'>
+  <meta name="theme-color" content="#14532d">
+  <title>{% block title %}IPSC Rulebook Assistant{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/htmx.min.js" defer></script>
+</head>
+<body>
+  <header>
+    <div class="wrap bar">
+      <a class="brand" href="/">IPSC Rulebook Assistant</a>
+      <nav>
+        <a href="/" {% if active == "ask" %}aria-current="page"{% endif %}>Ask</a>
+        <a href="/changes" {% if active == "changes" %}aria-current="page"{% endif %}>Changes</a>
+        <a href="/sources" {% if active == "sources" %}aria-current="page"{% endif %}>Sources</a>
+      </nav>
+    </div>
+  </header>
+  <main class="wrap">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="wrap">
+    Rule text is quoted exactly from the official IPSC PDFs; open the source link to verify.
+    The short answer is generated and may be wrong &ndash; the rules and interpretations are what count.
+  </footer>
+</body>
+</html>

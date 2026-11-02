@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% set active = "changes" %}
+{% block content %}
+<h1>What changed between editions?</h1>
+<form hx-post="/changes" hx-target="#result" hx-indicator="#busy" hx-disabled-elt="find button" method="post" action="/changes">
+  <div class="row">
+    <label for="discipline" class="inline">Discipline</label>
+    <select id="discipline" name="discipline" required>
+      <option value="">Choose&hellip;</option>
+      {% for d in disciplines %}<option {% if form.discipline == d %}selected{% endif %}>{{ d }}</option>{% endfor %}
+    </select>
+  </div>
+  <label for="scope">Compare</label>
+  <select id="scope" name="scope">
+    <option value="latest" {% if form.scope != "all" %}selected{% endif %}>Newest edition vs. the one before it</option>
+    <option value="all" {% if form.scope == "all" %}selected{% endif %}>All editions</option>
+  </select>
+  <label for="topic">Topic (optional)</label>
+  <input id="topic" name="topic" maxlength="{{ max_chars }}" value="{{ form.topic or '' }}"
+         placeholder="e.g. sight pictures">
+  <button type="submit">Compare editions</button>
+  <p id="busy" class="busy htmx-indicator" role="status">Comparing editions&hellip; this can take up to 30 seconds.</p>
+</form>
+<section id="result" aria-live="polite">{% include "_result.html" %}</section>
+{% endblock %}

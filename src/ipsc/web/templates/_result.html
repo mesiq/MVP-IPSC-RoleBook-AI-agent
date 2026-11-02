@@ -1,0 +1,8 @@
+{# The part of the page HTMX replaces. `result` is an AnswerOut or ChangesOut; `message` is a friendly error. #}
+{% if message %}
+  <p class="notice error" role="alert">{{ message }}</p>
+{% elif result is defined and result.used is defined %}
+  {% include "_answer.html" %}
+{% elif result is defined and result.changes is defined %}
+  {% include "_changes.html" %}
+{% endif %}

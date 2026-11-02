@@ -79,5 +79,6 @@ def format_evidence(items: list) -> str:
         if hit.cited_by.startswith("context for"):
             notes += f" ({hit.cited_by})"
         header = f"[E{number}] type={hit.doc_type} ref={hit.ref} edition={hit.edition_label} scope={scope}{notes}"
-        blocks.append(f"{header}\n{hit.title}\n{truncate(hit.text)}")
+        section = f"\nSECTION: {hit.context}" if hit.doc_type == "rule" and hit.context else ""
+        blocks.append(f"{header}{section}\n{hit.title}\n{truncate(hit.text)}")
     return "\n\n".join(blocks)

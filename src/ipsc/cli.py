@@ -78,7 +78,7 @@ def ask(question: str = typer.Argument(..., help="Your question"),
         debug: bool = typer.Option(False, help="Show parsed query and discipline")):
     """Answer a question: LLM parses it, RAG finds the rules, LLM summarises; citations are verbatim."""
     from . import answer as answer_module
-    from .render import print_answer
+    from .render import print_answer, print_changes
     con = store.connect()
     a, items = answer_module.ask(con, question, discipline, top, log=typer.echo)
     if a.intent == "changes":
@@ -89,7 +89,9 @@ def ask(question: str = typer.Argument(..., help="Your question"),
         if not a.disciplines:
             typer.echo("Please name the discipline (Handgun, PCC, Rifle, Shotgun, Mini Rifle, 22LR Handgun).")
             return
-        chg.run_changes(con, a.disciplines[0], a.topic, 40, typer.echo, language=a.language)
+        report = chg.build_report(con, a.disciplines[0], a.topic, 40, language=a.language, log=typer.echo,
+                                   scope=a.scope)
+        print_changes(report, typer.echo)
         return
     if debug:
         typer.echo(f"[debug] disciplines={a.disciplines} query={a.search_query!r}")
@@ -100,17 +102,21 @@ def ask(question: str = typer.Argument(..., help="Your question"),
 def changes(discipline: str = typer.Argument(..., help="e.g. PCC, Handgun, Rifle"),
             topic: str = typer.Option("", help="Only rules matching this topic, e.g. 'sight pictures'"),
             compare: str = typer.Option("", help="Two path substrings 'A|B' to compare explicit files (testing)"),
+            latest: bool = typer.Option(False, "--latest", help="Only newest edition vs the one before it"),
             limit: int = typer.Option(40, help="Max rules shown"),
             summary: bool = typer.Option(True, "--summary/--no-summary", help="LLM short summary on top")):
     """Show what changed between editions of a discipline's rulebook (green = new/changed, red = removed)."""
     from . import changes as chg
+    from .render import print_changes
     con = store.connect()
     docs = None
     if compare:
         rows = [dict(con.execute("SELECT * FROM docs WHERE rel_path LIKE ?", (f"%{p}%",)).fetchone())
                 for p in compare.split("|")]
         docs = sorted(rows, key=lambda d: (d["edition_year"], d["edition_month"]))
-    chg.run_changes(con, discipline, topic, limit, typer.echo, docs, summary)
+    report = chg.build_report(con, discipline, topic, limit, docs, summary, log=typer.echo,
+                                   scope="latest" if latest else "all")
+    print_changes(report, typer.echo)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,32 @@
+# Environment and secrets
 .venv/
 .env
+.env.*
+!.env.example
+
+# Generated data (database, source PDFs and their sidecars)
 data/
-__pycache__/
-*.egg-info/
-.vscode/
-*.py[cod]
 source_data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Embedding model cache
+.fastembed_cache/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

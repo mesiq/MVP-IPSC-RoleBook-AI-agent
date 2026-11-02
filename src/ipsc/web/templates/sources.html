@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% set active = "sources" %}
+{% block content %}
+<h1>Indexed documents</h1>
+<p>Only the newest rulebook of each discipline is used for answers; older editions are kept for comparisons.</p>
+<div class="table-scroll">
+<table>
+  <thead><tr><th>Type</th><th>Discipline</th><th>Edition</th><th>Pages</th><th>Document</th></tr></thead>
+  <tbody>
+  {% for s in sources %}
+    <tr>
+      <td>{{ s.doc_type }}</td>
+      <td>{{ s.disciplines | join(", ") or "all" }}</td>
+      <td>{{ s.edition }}</td>
+      <td>{{ s.pages }}</td>
+      <td><a href="{{ s.link }}" target="_blank" rel="noopener">{{ s.file }}</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

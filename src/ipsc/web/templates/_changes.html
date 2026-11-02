@@ -1,0 +1,30 @@
+<div class="changes">
+{% if result.notice %}
+  <p class="notice">{{ result.notice }} Add the older/newer PDF to the source folder and run <code>ipsc ingest</code>.</p>
+{% else %}
+  <p class="muted">Editions compared: {{ result.editions | join(" → ") }}</p>
+  <p>{{ result.total }} rule(s) differ in wording{% if result.total > result.changes | length %}; showing the first {{ result.changes | length }}{% endif %}.
+     {{ result.renumbered }} more were only renumbered or reformatted.</p>
+  <p class="legend"><span class="new">new or changed wording</span> <span class="old">wording removed in a later edition</span></p>
+  {% if result.overview %}
+    <h2>Summary</h2>
+    <p>{{ result.overview }}</p>
+  {% endif %}
+  {% for c in result.changes %}
+    <article class="change">
+      <h3>Rule {{ c.ref }} <span class="badge kind-{{ c.kind }}">{{ c.kind }}</span>
+        {% if c.renumbered %}<span class="meta">renumbered</span>{% endif %}</h3>
+      {% if c.summary %}<p class="summary">{{ c.summary }}</p>{% endif %}
+      {% for v in c.versions %}
+        <div class="citation">
+          <h4>Version {{ v.edition }}, Rule {{ v.ref }} <span class="meta">p.{{ v.page }}</span></h4>
+          <blockquote>{% for s in v.segments %}{% if s.marked %}<span class="{{ 'new' if v.newest else 'old' }}">{{ s.text }}</span>{% else %}{{ s.text }}{% endif %} {% endfor %}</blockquote>
+          <a class="source" href="{{ v.link }}" target="_blank" rel="noopener">Open source PDF</a>
+        </div>
+      {% endfor %}
+    </article>
+  {% else %}
+    <p class="muted">No wording changes found.</p>
+  {% endfor %}
+{% endif %}
+</div>

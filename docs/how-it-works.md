@@ -45,7 +45,8 @@ never translated.
 
 ## "What changed" questions
 
-`question.py` detects the intent (LLM, or keyword fallback). `changes.py` then:
+`question.py` detects the intent (LLM, or keyword fallback). `changes.py` returns a `ChangeReport` (plain data); `render.py` prints it in the terminal and the web templates
+show the same data as HTML.
 
 1. loads all editions of the discipline's rulebook (exactly the same discipline set), oldest to newest;
 2. aligns rules between neighbouring editions: identical text first, then similar text (fuzzy + embeddings),

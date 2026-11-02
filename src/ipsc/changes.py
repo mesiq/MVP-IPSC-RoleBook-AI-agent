@@ -10,7 +10,6 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 
 import numpy as np
-import typer
 
 from .config import source_link
 from .settings import CONTAIN_MIN, FUZZY_MIN, TOPK
@@ -296,37 +295,52 @@ def summarize(found: list, editions: str, log=lambda m: None, limit=25, language
     return str(data.get("overview", "")).strip(), pts
 
 
-def run_changes(con, discipline: str, topic: str = "", limit: int = 40, echo=typer.echo, explicit_docs: list = None,
-                summary: bool = True, language: str = "English"):
-    """Compare the editions of a discipline's rulebook and print the changes (shared by CLI and ask)."""
+@dataclass
+class ChangeReport:
+    """Everything a front end needs to show a 'what changed' answer (no printing happens here)."""
+    discipline: str
+    editions: list = field(default_factory=list)  # edition labels, oldest -> newest
+    notice: str = ""  # set when the comparison could not be made
+    topic: str = ""
+    topic_refs: list = field(default_factory=list)
+    total: int = 0  # rules that differ in wording
+    renumbered: int = 0  # rules that only moved or were reformatted
+    shown: list = field(default_factory=list)  # list[Change], sorted by rule number
+    overview: str = ""  # LLM summary (empty when unavailable)
+    points: list = field(default_factory=list)  # [(Change, one-sentence description)]
+
+
+def build_report(con, discipline: str, topic: str = "", limit: int = 40, explicit_docs: list = None,
+                 summary: bool = True, language: str = "English", log=lambda m: None,
+                 scope: str = "all") -> ChangeReport:
+    """Compare the editions of a discipline's rulebook (shared by the CLI and the web UI).
+
+    scope="latest" compares only the newest edition with the one before it; "all" follows every edition.
+    """
     from . import search as srch
     from .registry import detect_disciplines
+    report = ChangeReport(discipline=discipline, topic=topic)
     discs = detect_disciplines(discipline)
     docs = explicit_docs or (rulebook_editions(con, discs) if discs else [])
     if len(docs) < 2:
-        echo(f"Only {len(docs)} edition(s) of the {discipline} rulebook are indexed - nothing to compare yet.\n"
-             "Add the older/newer PDF to source_data\\Rules and run 'ipsc ingest'.")
-        return
-    echo("Editions compared: " + " -> ".join(f"{d['edition_label']}" for d in docs))
+        report.notice = (f"Only {len(docs)} edition(s) of the {discipline} rulebook are indexed - "
+                         "nothing to compare yet.")
+        return report
+    if scope == "latest":
+        docs = docs[-2:]
+    report.editions = [d["edition_label"] for d in docs]
     refs = None
     if topic:
-        res = srch.search(con, topic, discs or None, 15)
-        refs = {h.ref for h in res.rules}
-        echo(f"Topic '{topic}': checking rules {', '.join(sorted(refs))}")
-    found, renum = compare(con, docs, refs)
-    echo(f"{len(found)} rule(s) differ in wording." + (f" Showing first {limit}." if len(found) > limit else ""))
-    echo(f"({renum} further rule(s) were only renumbered/reformatted - not listed.)")
-    shown = sorted(found, key=lambda c: _ref_key(c.ref))[:limit]
-    if summary and shown:
-        s = summarize(shown, " -> ".join(f"{d['edition_label']}" for d in docs), echo,
-                      language=language)
-        if s:
-            overview, points = s
-            echo(f"\nSummary of changes:\n{overview}\n")
-            for c, text in points:
-                echo(f"- Rule {c.ref} [{c.kind.upper()}]: {text}")
-            echo("\nDetails with verbatim citations:")
-    render(shown, echo)
+        refs = {h.ref for h in srch.search(con, topic, discs or None, 15).rules}
+        report.topic_refs = sorted(refs)
+    found, report.renumbered = compare(con, docs, refs)
+    report.total = len(found)
+    report.shown = sorted(found, key=lambda c: _ref_key(c.ref))[:limit]
+    if summary and report.shown:
+        result = summarize(report.shown, " -> ".join(report.editions), log, language=language)
+        if result:
+            report.overview, report.points = result
+    return report
 
 
 def _ref_key(ref: str):
@@ -337,41 +351,40 @@ def _mask(w: str) -> str:
     return NUM.sub("#", re.sub(r"[^\w.#]", "", w.lower())).strip(".")
 
 
-def highlight(prev: str, cur: str) -> str:
-    """cur with words that are new or changed relative to prev in green bold."""
+def highlight_segments(prev: str, cur: str) -> list:
+    """cur split into (text, marked) pieces; marked = words that are new or changed relative to prev."""
     a, b = _clean(prev).split(), _clean(cur).split()
     sm = difflib.SequenceMatcher(None, [_mask(w) for w in a], [_mask(w) for w in b], autojunk=False)
-    out = []
-    for tag, _, _, j1, j2 in sm.get_opcodes():
-        seg = " ".join(b[j1:j2])
-        if seg:
-            out.append(typer.style(seg, fg="green", bold=True) if tag in ("replace", "insert") else seg)
-    return " ".join(out)
+    return [(" ".join(b[j1:j2]), tag in ("replace", "insert"))
+            for tag, _, _, j1, j2 in sm.get_opcodes() if j2 > j1]
 
 
-def strike(cur: str, nxt: str) -> str:
-    """cur with words that were removed or replaced in the next edition in red."""
+def strike_segments(cur: str, nxt: str) -> list:
+    """cur split into (text, marked) pieces; marked = words removed or replaced in the next edition."""
     a, b = _clean(cur).split(), _clean(nxt).split()
     sm = difflib.SequenceMatcher(None, [_mask(w) for w in a], [_mask(w) for w in b], autojunk=False)
-    out = []
-    for tag, i1, i2, _, _ in sm.get_opcodes():
-        seg = " ".join(a[i1:i2])
-        if seg:
-            out.append(typer.style(seg, fg="red") if tag in ("replace", "delete") else seg)
-    return " ".join(out)
+    return [(" ".join(a[i1:i2]), tag in ("replace", "delete"))
+            for tag, i1, i2, _, _ in sm.get_opcodes() if i2 > i1]
 
 
-def render(changes: list, echo=typer.echo, max_text=900):
-    for c in sorted(changes, key=lambda c: _ref_key(c.ref)):
-        echo(f"\n- Rule {c.ref}  [{c.kind.upper()}]" + ("  (renumbered)" if c.renumbered else ""))
-        for i, v in enumerate(c.versions):
-            if len(c.versions) == 1:
-                body = v.text
-            elif i == len(c.versions) - 1:
-                body = highlight(c.versions[i - 1].text, v.text)
-            else:
-                body = strike(v.text, c.versions[i + 1].text)
-            if len(body) > max_text:
-                body = body[:max_text] + " ..."
-            echo(f"  Citation version {v.label}, Rule {v.ref} (p.{v.page_label}):\n    {body}\n"
-                 f"    source: {v.link}")
+def version_segments(change: Change, index: int, max_chars: int = 900) -> list:
+    """Text of one edition of a changed rule as (text, marked) pieces, cut to max_chars.
+
+    The newest edition marks what is new; older editions mark what was removed later. A rule that exists in
+    only one edition is returned unmarked.
+    """
+    versions = change.versions
+    if len(versions) == 1:
+        pieces = [(versions[0].text, False)]
+    elif index == len(versions) - 1:
+        pieces = highlight_segments(versions[index - 1].text, versions[index].text)
+    else:
+        pieces = strike_segments(versions[index].text, versions[index + 1].text)
+    out, used = [], 0
+    for text, marked in pieces:
+        if used + len(text) > max_chars:
+            out.append((text[:max(max_chars - used, 0)] + " ...", marked))
+            break
+        out.append((text, marked))
+        used += len(text) + 1
+    return out

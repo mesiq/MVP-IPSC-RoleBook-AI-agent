@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% set active = "ask" %}
+{% block content %}
+<h1>Ask about the rules</h1>
+<form hx-post="/ask" hx-target="#result" hx-indicator="#busy" hx-disabled-elt="find button" method="post" action="/ask">
+  <label for="question">Your question (any language)</label>
+  <textarea id="question" name="question" rows="3" maxlength="{{ max_chars }}" required
+            placeholder="e.g. Can a competitor take a sight picture with a loaded handgun?">{{ form.question or "" }}</textarea>
+  <div class="row">
+    <label for="discipline" class="inline">Discipline</label>
+    <select id="discipline" name="discipline">
+      <option value="">Detect from question</option>
+      {% for d in disciplines %}<option {% if form.discipline == d %}selected{% endif %}>{{ d }}</option>{% endfor %}
+    </select>
+    <button type="submit">Ask</button>
+  </div>
+  <p id="busy" class="busy htmx-indicator" role="status">Searching the rulebooks&hellip; this can take up to 20 seconds.</p>
+</form>
+<section id="result" aria-live="polite">{% include "_result.html" %}</section>
+{% endblock %}

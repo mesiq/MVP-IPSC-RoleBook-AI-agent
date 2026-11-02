@@ -14,6 +14,11 @@ def _get_model():
     return _model
 
 
+def warm_up() -> None:
+    """Load the embedding model now (web server start) instead of during the first question."""
+    _get_model()
+
+
 def embed_passages(texts: list) -> np.ndarray:
     vecs = np.array(list(_get_model().embed(texts, batch_size=32)), dtype=np.float32)
     return vecs / np.linalg.norm(vecs, axis=1, keepdims=True)

@@ -35,3 +35,17 @@ def test_high_certainty_is_downgraded_when_cited_rule_is_unrelated(make_hit):
 
 def test_no_cited_passage_means_low_certainty(make_hit):
     assert certainty.check_certainty("high", [], "anything")[0] == "low"
+
+
+def test_scope_is_latest_only_when_the_user_asks_for_the_newest_edition():
+    from ipsc.question import _scope
+    assert _scope(None, "What changed in the most recent PCC rulebook?") == "latest"
+    assert _scope(None, "What changed in the PCC rules since 2019?") == "all"
+    assert _scope("latest", "anything") == "latest"
+    assert _scope("all", "newest rulebook") == "all"
+
+
+def test_llm_sees_the_section_heading_that_carries_the_penalty(make_hit):
+    rule = make_hit(ref="10.5.10", text="Failure to keep the finger outside the trigger guard.",
+                    context="Chapter 10 > 10.5 Disqualification - Unsafe Gun Handling")
+    assert "SECTION: Chapter 10 > 10.5 Disqualification - Unsafe Gun Handling" in evidence.format_evidence([rule])

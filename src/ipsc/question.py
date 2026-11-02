@@ -9,6 +9,7 @@ from .registry import KNOWN_DISCIPLINES, detect_disciplines
 
 # "what changed in the latest rulebook" needs BOTH a change word and an edition word.
 CHANGE_WORDS = re.compile(r"\b(chang\w*|differen\w*|what.?s new|updated?|new rules?|revised|revision)\b", re.I)
+LATEST_WORDS = re.compile(r"\b(latest|most recent|newest|current|last)\b", re.I)
 EDITION_WORDS = re.compile(r"\b(rule ?books?|editions?|versions?|latest|recent|newest|compared|since)\b", re.I)
 
 # Words that only name the rulebook or discipline, so a topic made of them means "all changes".
@@ -28,6 +29,7 @@ class ParsedQuestion:
     language: str = "English"  # language of the user's question
     intent: str = "answer"  # "answer" or "changes"
     topic: str = ""  # for "changes": what the user asked about, "" = everything
+    scope: str = "all"  # for "changes": "latest" = newest edition vs the one before, "all" = every edition
 
     @property
     def is_english(self) -> bool:
@@ -70,13 +72,22 @@ def parse_question(question: str, forced_discipline: str = "",
         language=str(data.get("language") or "English").strip() or "English",
         intent="changes" if str(data.get("intent", "")).lower() == "changes" else "answer",
         topic=clean_topic(str(data.get("topic") or "")),
+        scope=_scope(data.get("scope"), question),
     )
+
+
+def _scope(value: object, question: str) -> str:
+    """"latest" or "all"; trusts the LLM, otherwise looks for words like "latest" in the question."""
+    if str(value or "").lower() in ("latest", "all"):
+        return str(value).lower()
+    return "latest" if LATEST_WORDS.search(question) else "all"
 
 
 def _parse_without_llm(question: str, forced: list, log: Callable[[str], None]) -> ParsedQuestion:
     parsed = ParsedQuestion(disciplines=forced or detect_disciplines(question), search_query=question)
     if looks_like_change_question(question):
         parsed.intent = "changes"
+        parsed.scope = _scope(None, question)
     if not looks_english(question):
         parsed.language = "the same language as the question"
         parsed.search_query = _translate_to_english(question, log)

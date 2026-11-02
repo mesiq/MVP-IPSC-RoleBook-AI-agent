@@ -15,7 +15,10 @@ PARSE_SYS = (
     '"intent": "changes if the user asks what changed/is new/differs between rulebook editions or versions, '
     'otherwise answer", '
     '"topic": "for intent changes only: the specific subject asked about (e.g. sight pictures), or empty '
-    'if they want all changes"}'
+    'if they want all changes", '
+    '"scope": "for intent changes only: latest if the user asks only about the most recent/newest/latest '
+    'edition (what changed in the newest rulebook), all if they ask about changes across several editions or '
+    'do not say"}'
 )
 
 # 1b. Fallback when PARSE_SYS failed: only translate, so the English rulebooks can still be searched.
@@ -28,6 +31,10 @@ TRANSLATE_SYS = (
 ANSWER_SYS = (
     "You assist IPSC Range Officers. Answer ONLY from the numbered evidence passages. "
     "Interpretations (type=interpretation) override rules; newer interpretations override older ones. "
+    "A rule's SECTION line gives the chapter and section headings it belongs to; these headings state the "
+    "consequence for every rule listed under them (e.g. a section titled 'Disqualification - Unsafe Gun "
+    "Handling' means each listed rule is penalised by disqualification), so use them to answer "
+    "what-happens-if questions and cite the rule. "
     "Never quote or invent rule text and never mention rules that are not in the evidence; refer to passages "
     "by their id only. Rely only on passages whose wording directly addresses the question; do not stretch "
     "unrelated passages or infer facts they do not state, and list weak ones under 'considered' or omit them. "
