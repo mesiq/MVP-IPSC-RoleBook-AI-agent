@@ -4,19 +4,21 @@ also available as JSON under /api for other clients.
 Run:  ipsc-web   (or: uvicorn ipsc.web.app:app)
 """
 import os
+import re
 import sqlite3
 from contextlib import asynccontextmanager, closing
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .. import answer as answer_module
 from .. import changes as changes_module
 from .. import config, embed, store
-from ..registry import KNOWN_DISCIPLINES
+from .. import redline as redline_module
+from ..registry import KNOWN_DISCIPLINES, detect_disciplines
 from ..settings import MAX_QUESTION_CHARS
 from .limits import JobSlots, RateLimiter
 from .schemas import AnswerOut, ChangesOut, SourceOut, to_answer, to_changes
@@ -61,6 +63,24 @@ def answer_question(db_path: Path, question: str, discipline: str) -> AnswerOut 
 def compare_editions(db_path: Path, discipline: str, topic: str, scope: str) -> ChangesOut:
     with closing(open_db(db_path)) as con:
         return to_changes(changes_module.build_report(con, discipline, topic, scope=scope))
+
+
+def redline_pdf(db_path: Path, discipline: str, older: str, newer: str) -> tuple[str, bytes]:
+    """A generated PDF of the newer edition with inline changes relative to the older one."""
+    with closing(open_db(db_path)) as con:
+        docs = changes_module.rulebook_editions(con, detect_disciplines(discipline))
+        if len(docs) < 2:
+            raise Problem(f"Only {len(docs)} edition(s) are indexed for {discipline}.")
+        by_label = {d["edition_label"]: d for d in docs}
+        old_doc, new_doc = by_label.get(older), by_label.get(newer)
+        if not old_doc or not new_doc:
+            labels = ", ".join(d["edition_label"] for d in docs)
+            raise Problem(f"Please choose two valid editions for {discipline}: {labels}.")
+        if (old_doc["edition_year"], old_doc["edition_month"]) >= (new_doc["edition_year"], new_doc["edition_month"]):
+            raise Problem("Older edition must be earlier than newer edition.")
+        data = redline_module.build_redline_pdf(con, old_doc, new_doc)
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", f"{discipline}-{newer}-vs-{older}-redline").strip("-")
+    return f"{safe}.pdf", data
 
 
 def list_sources(db_path: Path) -> list[SourceOut]:
@@ -186,6 +206,17 @@ def create_app(db_path: Path = config.DB_PATH, data_dir: Path = config.DATA_DIR)
             return fail(request, "changes.html", error, form)
         return page(request, "changes.html", result=result, form=form)
 
+    @app.post("/changes/redline", dependencies=[Depends(guard)])
+    def changes_redline(request: Request, discipline: str = Form(""), older: str = Form(""), newer: str = Form("")):
+        try:
+            if not check_discipline(discipline):
+                raise Problem(NEED_DISCIPLINE)
+            name, data = run_job(redline_pdf, discipline, older.strip(), newer.strip())
+        except Problem as error:
+            return fail(request, "changes.html", error, {"discipline": discipline, "topic": "", "scope": "all"})
+        return Response(data, media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
     @app.get("/sources", response_class=HTMLResponse)
     def sources_page(request: Request):
         return templates.TemplateResponse(request, "sources.html", {"sources": list_sources(db_path)})
@@ -212,6 +243,14 @@ def create_app(db_path: Path = config.DB_PATH, data_dir: Path = config.DATA_DIR)
             raise Problem(NEED_DISCIPLINE)
         return run_job(compare_editions, discipline, topic.strip()[:MAX_QUESTION_CHARS],
                        scope if scope in SCOPES else "latest")
+
+    @app.get("/api/redline", dependencies=[Depends(guard)])
+    def api_redline(discipline: str, older: str, newer: str):
+        if not check_discipline(discipline):
+            raise Problem(NEED_DISCIPLINE)
+        name, data = run_job(redline_pdf, discipline, older.strip(), newer.strip())
+        return Response(data, media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
     @app.get("/api/sources", response_model=list[SourceOut])
     def api_sources():

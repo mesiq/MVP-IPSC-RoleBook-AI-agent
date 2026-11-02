@@ -72,9 +72,9 @@ def rulebook_editions(con, disciplines: list) -> list:
     return docs
 
 
-def _load(con, doc_id) -> list:
+def load_chunks(con, doc_id) -> list:
     out = []
-    for r in con.execute("SELECT ref, text, page_pdf, page_label, embedding FROM chunks "
+    for r in con.execute("SELECT ref, text, page_pdf, page_label, context, embedding FROM chunks "
                          "WHERE doc_id=? AND ref!='p1' ORDER BY id", (doc_id,)):
         n = _norm(r["text"])
         if r["ref"].startswith("Appendix"):
@@ -94,7 +94,8 @@ def _load(con, doc_id) -> list:
         else:
             r_ref = r["ref"]
         out.append({"ref": r_ref, "text": r["text"], "norm": n, "words": n.split(),
-                    "page_pdf": r["page_pdf"], "page_label": r["page_label"], "vec": vec})
+                    "page_pdf": r["page_pdf"], "page_label": r["page_label"], "vec": vec,
+                    "context": r["context"] or ""})
     return out
 
 
@@ -198,7 +199,7 @@ def _version(doc, chunks, idxs) -> Version:
 
 def compare(con, docs: list, refs: set = None) -> tuple:
     """Return (changes, renumbered_only_count). Aligns consecutive editions and follows each rule through them."""
-    chunks = [_load(con, d["id"]) for d in docs]
+    chunks = [load_chunks(con, d["id"]) for d in docs]
     n = len(docs)
     threads = []  # each: {"versions": [(doc_index, Version)]}
     owner = [dict() for _ in docs]  # per doc: chunk idx -> thread idx
@@ -357,6 +358,23 @@ def highlight_segments(prev: str, cur: str) -> list:
     sm = difflib.SequenceMatcher(None, [_mask(w) for w in a], [_mask(w) for w in b], autojunk=False)
     return [(" ".join(b[j1:j2]), tag in ("replace", "insert"))
             for tag, _, _, j1, j2 in sm.get_opcodes() if j2 > j1]
+
+
+def diff_words(old: str, new: str) -> list:
+    """Word-level diff as (kind, text) pieces in reading order; kind is "same", "add" or "del". "same" and "add" use the
+    new wording, "del" the old."""
+    a, b = _clean(old).split(), _clean(new).split()
+    sm = difflib.SequenceMatcher(None, [_mask(w) for w in a], [_mask(w) for w in b], autojunk=False)
+    out = []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            out.append(("same", " ".join(b[j1:j2])))
+            continue
+        if i2 > i1:
+            out.append(("del", " ".join(a[i1:i2])))
+        if j2 > j1:
+            out.append(("add", " ".join(b[j1:j2])))
+    return out
 
 
 def strike_segments(cur: str, nxt: str) -> list:

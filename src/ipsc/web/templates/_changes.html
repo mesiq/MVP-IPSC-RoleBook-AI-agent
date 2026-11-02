@@ -5,6 +5,22 @@
   <p class="muted">Editions compared: {{ result.editions | join(" → ") }}</p>
   <p>{{ result.total }} rule(s) differ in wording{% if result.total > result.changes | length %}; showing the first {{ result.changes | length }}{% endif %}.
      {{ result.renumbered }} more were only renumbered or reformatted.</p>
+  {% if result.editions | length > 1 %}
+    {% set old_default = result.editions[-2] %}
+    {% set new_default = result.editions[-1] %}
+    <form class="row" method="post" action="/changes/redline">
+      <input type="hidden" name="discipline" value="{{ result.discipline }}">
+      <label for="older" class="inline">Older</label>
+      <select id="older" name="older" required>
+        {% for e in result.editions %}<option value="{{ e }}" {% if e == old_default %}selected{% endif %}>{{ e }}</option>{% endfor %}
+      </select>
+      <label for="newer" class="inline">Newer</label>
+      <select id="newer" name="newer" required>
+        {% for e in result.editions %}<option value="{{ e }}" {% if e == new_default %}selected{% endif %}>{{ e }}</option>{% endfor %}
+      </select>
+      <button type="submit">Download highlighted PDF</button>
+    </form>
+  {% endif %}
   <p class="legend"><span class="new">new or changed wording</span> <span class="old">wording removed in a later edition</span></p>
   {% if result.overview %}
     <h2>Summary</h2>

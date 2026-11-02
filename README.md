@@ -72,9 +72,9 @@ ipsc-web                        # http://127.0.0.1:8000  (IPSC_HOST / IPSC_PORT 
 ```
 
 Three screens: **Ask**, **Changes** (edition comparison with
-highlighted new/removed wording) and **Sources**. Every citation links to the source PDF, which the app serves
+highlighted new/removed wording, plus a **Download highlighted PDF** button) and **Sources**. Every citation links to the source PDF, which the app serves
 itself (`/files/...`, set `IPSC_PUBLIC_URL` only if the PDFs are hosted elsewhere). A JSON API is available
-too: `POST /api/ask`, `GET /api/changes?discipline=PCC&topic=...`, `GET /api/sources`, interactive docs at `/api/docs`.
+too: `POST /api/ask`, `GET /api/changes?discipline=PCC&topic=...`, `GET /api/redline?discipline=Handgun&older=Jan 2025&newer=Jan 2026` (the highlighted PDF), `GET /api/sources`, interactive docs at `/api/docs`.
 
 The site is public, so it protects the free LLM quota: a per-visitor rate limit and a limit on parallel questions
 (numbers in `settings.py`). Behind a reverse proxy set `IPSC_TRUST_PROXY=1` so visitors are told apart by their real address.
@@ -134,6 +134,7 @@ More detail and the reasons behind the design: [docs/how-it-works.md](docs/how-i
 | `src/ipsc/certainty.py` | step 5 |
 | `src/ipsc/prompts.py` | **all LLM instructions** (three prompts) |
 | `src/ipsc/llm.py` | calls Groq / Gemini, retries, fallback |
+| `src/ipsc/redline.py` | the highlighted-changes PDF: newer edition with removed wording red/struck and added wording green (renumbered rules show both numbers) |
 | `src/ipsc/changes.py` | comparing editions of a rulebook; returns a `ChangeReport` (plain data) |
 | `src/ipsc/web/` | the web app (see above) |
 | `src/ipsc/ingest.py`, `registry.py`, `chunker.py`, `store.py`, `embed.py` | reading PDFs and sidecars, chunking, database, embeddings |

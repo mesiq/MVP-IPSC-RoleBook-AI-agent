@@ -32,3 +32,8 @@ RATE_LIMIT_REQUESTS = 12  # Per visitor (IP address) ...
 RATE_LIMIT_WINDOW_SECONDS = 60  # ... per this many seconds, for the endpoints that call the LLM.
 MAX_PARALLEL_JOBS = 2  # Questions / comparisons processed at the same time (2 vCPUs, free LLM quota).
 QUEUE_WAIT_SECONDS = 25  # A request waits this long for a free slot, then gets a "busy" message.
+
+# Redline PDF: pictures copied from the newer rulebook.
+IMAGE_MIN_SIZE = 60  # Pictures smaller than this (pixels, either side) are icons or decoration and are skipped.
+IMAGE_MAX_PAGES = 3  # A picture repeated on more pages than this is a logo or page furniture and is skipped.
+IMAGE_MAX_WIDTH = 380  # Widest a picture is drawn (points; the text column is about 500).

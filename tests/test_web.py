@@ -126,3 +126,26 @@ def test_changes_are_marked_for_display(tmp_path):
     assert [s.text for s in older.segments if s.marked] == ["allowed."]
     assert [s.text for s in newer.segments if s.marked] == ["prohibited."]
     assert newer.newest and not older.newest
+
+
+def test_changes_page_offers_redline_download(client, monkeypatch, tmp_path):
+    doc = {"edition_label": "Jan 2025", "path": tmp_path / "a.pdf", "rel_path": "a.pdf"}
+    new_doc = {"edition_label": "Jan 2026", "path": tmp_path / "b.pdf", "rel_path": "b.pdf"}
+    old = Version(doc, "5.1", "Lasers are allowed.", 1, "1")
+    new = Version(new_doc, "5.1", "Lasers are prohibited.", 1, "1")
+    report = ChangeReport(discipline="Handgun", editions=["Jan 2025", "Jan 2026"], total=1,
+                          shown=[Change("5.1", "changed", [old, new])])
+    monkeypatch.setattr(web, "compare_editions", lambda *args: to_changes(report))
+    page = client.post("/changes", data={"discipline": "Handgun", "topic": "", "scope": "all"})
+    assert "Download highlighted PDF" in page.text
+    assert 'name="older"' in page.text and 'name="newer"' in page.text
+    assert 'value="Jan 2025"' in page.text and 'value="Jan 2026"' in page.text
+
+
+def test_redline_download_returns_pdf(client, monkeypatch):
+    monkeypatch.setattr(web, "redline_pdf", lambda *args: ("x.pdf", b"%PDF-1.4\\n%fake"))
+    reply = client.post("/changes/redline", data={"discipline": "Handgun", "older": "Jan 2025", "newer": "Jan 2026"})
+    assert reply.status_code == 200
+    assert reply.headers["content-type"].startswith("application/pdf")
+    assert 'attachment; filename="x.pdf"' in reply.headers["content-disposition"]
+    assert reply.content.startswith(b"%PDF")
