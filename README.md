@@ -1,13 +1,15 @@
 # IPSC Rulebook Assistant
 
-A web app that helps Range Officers, Range Masters and Match Directors look up IPSC rules.
+A web app that helps Range Officers, Range Masters and Match Directors look up IPSC rules. It runs in any browser (phone, tablet, desktop).
 
-You ask a question in any language. The tool finds the matching rules, interpretations and manual
+You ask a question in any language. The app finds the matching rules, interpretations and manual
 passages in your PDF files and shows **the exact text from the PDFs**, with a link to the source page.
 A language model (LLM) only helps to understand the question and to write a short conclusion.
 **It never writes or changes rule text.**
 
 A second function compares rulebook editions ("what changed in the latest PCC rulebook?").
+
+What the answer screen shows (every citation also has an "Open source PDF" link):
 
 ```
 Question: Can a shooter take a sight picture with a loaded handgun?
@@ -23,10 +25,12 @@ Certainty level: HIGH - The rule directly covers the exact situation.
 Rules used (verbatim citations):
 - Rule 8.7.1  [Jan 2026, p.27]
     "Competitors are prohibited from taking a sight picture and/or dry firing prior to the Start Signal. ..."
-    source: file:///.../IPSC Handgun ... .pdf#page=33
+    [Open source PDF] -> .../files/IPSC Handgun ... .pdf#page=33
 ```
 
 ## Setup (Windows, Python 3.12)
+
+Use Python 3.12. Python 3.15 does not work yet: `fastembed` cannot resolve its `onnxruntime` dependency there.
 
 ```powershell
 python -m venv .venv
@@ -35,13 +39,15 @@ pip install -e .[dev]
 copy .env.example .env      # then put your API key(s) in .env
 ```
 
+Then add your PDFs (next section), run `ipsc-ingest` and start the site with `ipsc-web`.
+
 `.env` settings (see `.env.example`): `LLM_PROVIDER` (`groq` or `gemini`), `LLM_FALLBACK`,
 `GROQ_API_KEY`, `GROQ_MODEL`, `GEMINI_API_KEY`, `GEMINI_MODEL`, optional `IPSC_PUBLIC_URL`.
 
 ## Adding PDFs
 
 1. Put the PDF anywhere under `source_data\` (the folders `Rules`, `Interpretations`, `Manuals` are just a convention).
-2. Next to it create a sidecar file named `<pdf file name>.meta.json`:
+2. Next to it create a sidecar file named `<pdf file name.pdf>.meta.json`:
 
    ```json
    {"doc_type": "rule", "discipline": ["Handgun"], "edition": "2026-01"}
@@ -65,14 +71,14 @@ not supported. Everything is assumed to be English.
 ipsc-web                        # http://127.0.0.1:8000  (IPSC_HOST / IPSC_PORT to change)
 ```
 
-The page works on phones, tablets and desktop browsers. Three screens: **Ask**, **Changes** (edition comparison with
+Three screens: **Ask**, **Changes** (edition comparison with
 highlighted new/removed wording) and **Sources**. Every citation links to the source PDF, which the app serves
 itself (`/files/...`, set `IPSC_PUBLIC_URL` only if the PDFs are hosted elsewhere). A JSON API is available
 too: `POST /api/ask`, `GET /api/changes?discipline=PCC&topic=...`, `GET /api/sources`, interactive docs at `/api/docs`.
 
 The site is public, so it protects the free LLM quota: a per-visitor rate limit and a limit on parallel questions
 (numbers in `settings.py`). Behind a reverse proxy set `IPSC_TRUST_PROXY=1` so visitors are told apart by their real address.
-Ingest stays a command-line job; after `ipsc-ingest` new data is used immediately.
+Adding PDFs is an admin task done on the server with `ipsc-ingest` (the website only reads the index); after `ipsc-ingest` new data is used immediately.
 
 **Deploy on a server** with Docker (Caddy gives automatic HTTPS):
 

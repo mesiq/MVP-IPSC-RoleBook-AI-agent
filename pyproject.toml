@@ -3,7 +3,7 @@ name = "ipsc-rulebook-agent"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = ["pymupdf", "fastembed", "numpy", "python-dotenv", "httpx",
-                "fastapi", "uvicorn", "jinja2", "python-multipart"]
+                "fastapi", "pydantic", "uvicorn", "jinja2", "python-multipart"]
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
