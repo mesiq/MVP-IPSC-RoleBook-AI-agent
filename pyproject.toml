@@ -4,6 +4,13 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = ["pymupdf", "fastembed", "numpy", "typer", "python-dotenv", "httpx"]
 
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["eval: retrieval evaluation against the indexed database (needs `ipsc ingest` first)"]
+
 [project.scripts]
 ipsc = "ipsc.cli:app"
 

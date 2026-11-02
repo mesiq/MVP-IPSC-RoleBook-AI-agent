@@ -1,4 +1,4 @@
-import difflib
+﻿import difflib
 import json
 import re
 from dataclasses import dataclass, field
@@ -35,6 +35,8 @@ class Hit:
     score: float = 0.0
     interpretations: list = field(default_factory=list)  # for rule hits
     cited_by: str = ""
+    edition_note: str = ""
+    related: list = field(default_factory=list)
     also_in: list = field(default_factory=list)
     _norm: str = ""
 
@@ -121,6 +123,25 @@ def _applies(interp: Hit, disciplines: list, rule_disciplines: list = None) -> b
     return not target or bool(set(scope) & set(target))
 
 
+MONTHS = {m: i for i, m in enumerate("jan feb mar apr may jun jul aug sep oct nov dec".split(), 1)}
+
+
+def edition_key(label: str):
+    """"January 2026" / "Jan 2026" -> (2026, 1); None if not parseable."""
+    m = re.search(r"([A-Za-z]{3})[a-z]*\.?\s+(\d{4})", label or "")
+    if not m or m.group(1).lower() not in MONTHS:
+        return None
+    return int(m.group(2)), MONTHS[m.group(1).lower()]
+
+
+def _edition_relation(interp: Hit, rule: Hit) -> str:
+    """same | older (interpretation targets an earlier edition) | newer | unknown."""
+    t, r = edition_key(interp.meta.get("edition", "")), edition_key(rule.edition_label)
+    if not t or not r:
+        return "unknown"
+    return "same" if t == r else ("older" if t < r else "newer")
+
+
 def _covers(cited: str, ref: str) -> bool:
     return ref == cited or ref.startswith(cited + ".")
 
@@ -163,6 +184,8 @@ def _collapse_duplicates(ranked: list) -> list:
 
 
 DISC_PRIORITY = ["Handgun", "PCC", "Rifle", "Shotgun", "Mini Rifle", "22LR Handgun", "Action Air"]
+RELATED_FOR = 3
+MAX_KIDS = 3
 
 
 def search(con, query: str, disciplines: list = None, top_k: int = 8) -> Result:
@@ -216,6 +239,12 @@ def search(con, query: str, disciplines: list = None, top_k: int = 8) -> Result:
         for it in all_interps:
             if any(_covers(c, rule.ref) for c in it.meta.get("rules", [])) \
                     and _applies(it, disciplines, rule.disciplines):
+                rel = _edition_relation(it, rule)
+                if rel == "newer":
+                    continue
+                if rel == "older":
+                    it.edition_note = (f"written for the {it.meta.get('edition')} edition; the current rulebook is "
+                                       f"{rule.edition_label} - check the wording still matches")
                 rule.interpretations.append(it)
     # Surface linked interpretations in the main list as well.
     seen = {h.id for h in interps}
@@ -226,4 +255,27 @@ def search(con, query: str, disciplines: list = None, top_k: int = 8) -> Result:
                 seen.add(it.id)
     interps.sort(key=lambda h: (-ed.get(h.rel_path, (0, 0, 0))[0], -ed.get(h.rel_path, (0, 0, 0))[1],
                                 -ed.get(h.rel_path, (0, 0, 0))[2], -h.score))
+    for rule in rules[:RELATED_FOR]:
+        rule.related = _related(con, rule)
     return Result(disciplines, interps, rules, manuals)
+
+
+def _related(con, rule: Hit) -> list:
+    """Parent rule and direct sub-rules of the same rulebook (context, exceptions)."""
+    doc = con.execute("SELECT id FROM docs WHERE rel_path=?", (rule.rel_path,)).fetchone()
+    if not doc:
+        return []
+    refs = []
+    if "." in rule.ref and rule.ref.count(".") > 1:
+        refs.append(rule.ref.rsplit(".", 1)[0])
+    kids = [r[0] for r in con.execute(
+        "SELECT ref FROM chunks WHERE doc_id=? AND ref LIKE ? ORDER BY id", (doc["id"], rule.ref + ".%"))]
+    refs += [k for k in kids if k.count(".") == rule.ref.count(".") + 1][:MAX_KIDS]
+    out = []
+    for ref in refs:
+        row = con.execute("SELECT id FROM chunks WHERE doc_id=? AND ref=? ORDER BY id LIMIT 1",
+                          (doc["id"], ref)).fetchone()
+        if row:
+            out.append(_load(con, [row["id"]])[row["id"]])
+    return out
+

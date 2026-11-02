@@ -6,6 +6,12 @@ from . import llm, search as srch
 from .registry import detect_disciplines
 
 MAX_EVIDENCE = 10
+MAX_RELATED = 4
+MAX_PASSAGE_CHARS = 1300
+MAX_TOTAL_CHARS = 11000  # keeps the prompt inside Groq's free 8k tokens-per-minute budget
+MIN_COVERAGE = 0.3
+TRANSLATE_SYS = ('Translate the IPSC shooting-sport question into English search keywords using official IPSC '
+                 'terminology. Respond with JSON only: {"search_query": "..."}')
 DISC_NAMES = ["Handgun", "22LR Handgun", "PCC", "Rifle", "Shotgun", "Mini Rifle", "Action Air"]
 
 PARSE_SYS = (
@@ -102,16 +108,74 @@ def _evidence(res, per_rule_interps=3):
             add(it)
     for h in res.manuals:
         add(h)
-    return items[:MAX_EVIDENCE]
+    items = items[:MAX_EVIDENCE]
+    # Parent / sub-rules give context and exceptions; they fill the remaining budget.
+    for h in res.rules:
+        for r in h.related:
+            if len(items) >= MAX_EVIDENCE + MAX_RELATED:
+                break
+            if r.id not in seen:
+                seen.add(r.id)
+                r.cited_by = f"context for {h.ref}"
+                items.append(r)
+    out, used = [], 0
+    for h in items:
+        used += min(len(h.text), MAX_PASSAGE_CHARS)
+        if used > MAX_TOTAL_CHARS and out:
+            break
+        out.append(h)
+    return out
+
+
+def truncate(text: str, limit: int = None) -> str:
+    """Cut at a sentence boundary (or word boundary) instead of mid-sentence."""
+    limit = limit or MAX_PASSAGE_CHARS
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    m = max(cut.rfind(". "), cut.rfind("; "), cut.rfind(": "))
+    cut = cut[:m + 1] if m > limit * 0.5 else cut[:cut.rfind(" ")]
+    return cut + " [...]"
 
 
 def format_evidence(items) -> str:
     out = []
     for i, h in enumerate(items, 1):
         scope = h.meta.get("scope", "") if h.doc_type == "interpretation" else ", ".join(h.disciplines)
-        out.append(f"[E{i}] type={h.doc_type} ref={h.ref} edition={h.edition_label} scope={scope}\n"
-                   f"{h.title}\n{h.text[:1000]}")
+        note = f" NOTE={h.edition_note}" if h.edition_note else ""
+        if h.cited_by.startswith("context for"):
+            note += f" ({h.cited_by})"
+        out.append(f"[E{i}] type={h.doc_type} ref={h.ref} edition={h.edition_label} scope={scope}{note}\n"
+                   f"{h.title}\n{truncate(h.text)}")
     return "\n\n".join(out)
+
+
+WORD = re.compile(r"[A-Za-z]{4,}")
+COMMON_EN = set("the and what that this with from have can are for not may when which shall must does".split())
+
+
+def looks_english(q: str) -> bool:
+    if re.search(r"[^\x00-\x7F]", q):
+        return False
+    words = re.findall(r"[a-z']+", q.lower())
+    return not words or sum(w in COMMON_EN or w in {"is", "a", "of", "to", "in", "it", "do", "i"} for w in words) >= 1
+
+
+def _terms(s: str) -> set:
+    return {w.lower()[:5] for w in WORD.findall(s) if w.lower() not in COMMON_EN | srch.STOP}
+
+
+def cap_certainty(cert: str, used_items, query: str) -> tuple:
+    """Code-side sanity check: HIGH needs a cited passage that really overlaps the question's key terms."""
+    if cert != "high":
+        return cert, ""
+    terms = _terms(query)
+    if not terms or not used_items:
+        return cert, ""
+    best = max(len(terms & _terms(h.title + " " + h.text)) / len(terms) for h in used_items)
+    if best < MIN_COVERAGE:
+        return "medium", f"downgraded: cited passages cover only {best:.0%} of the question's key terms"
+    return cert, ""
 
 
 def ask(con, question: str, discipline: str = "", top: int = 8, log=lambda m: None) -> tuple:
@@ -133,6 +197,13 @@ def ask(con, question: str, discipline: str = "", top: int = 8, log=lambda m: No
         discs = discs or detect_disciplines(question)
         if looks_like_change_question(question):
             intent = "changes"
+        if not looks_english(question):
+            language = "the same language as the question"
+            try:
+                query = str(llm.complete_json(TRANSLATE_SYS, question, log).get("search_query") or question)
+            except llm.LLMError:
+                log("  WARNING: could not translate the question to English; rules are English, "
+                    "so results may be poor. Try again later or ask in English.")
 
     if intent == "changes":
         return Answer(disciplines=discs or [], search_query=query, intent="changes", topic=topic,
@@ -195,4 +266,8 @@ def ask(con, question: str, discipline: str = "", top: int = 8, log=lambda m: No
     # Without any cited evidence the conclusion cannot be trusted.
     if not ans.used:
         ans.certainty = "low"
+    else:
+        ans.certainty, why = cap_certainty(ans.certainty, [items[i] for i in ans.used], query)
+        if why:
+            ans.certainty_reason = f"{ans.certainty_reason} ({why})".strip()
     return ans, items

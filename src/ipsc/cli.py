@@ -100,7 +100,8 @@ def ask(question: str = typer.Argument(..., help="Your question"),
         typer.echo(f"- {kind}{label}  [{h.edition_label}, p.{h.page_label}]")
         typer.echo(f"    \"{h.text}\"")
         typer.echo(f"    source: {h.link}")
-
+        if h.edition_note:
+            typer.echo(f"    note: {h.edition_note}")
     L = a.labels
     typer.echo(f"\n{L['short_answer']}:\n{a.interpretation}\n")
     if a.reasoning:
