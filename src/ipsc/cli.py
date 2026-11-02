@@ -88,7 +88,7 @@ def ask(question: str = typer.Argument(..., help="Your question"),
         if not a.disciplines:
             typer.echo("Please name the discipline (Handgun, PCC, Rifle, Shotgun, Mini Rifle, 22LR Handgun).")
             return
-        chg.run_changes(con, a.disciplines[0], a.topic, 40, typer.echo)
+        chg.run_changes(con, a.disciplines[0], a.topic, 40, typer.echo, language=a.language)
         return
     if debug:
         typer.echo(f"[debug] disciplines={a.disciplines} query={a.search_query!r}")
@@ -101,24 +101,27 @@ def ask(question: str = typer.Argument(..., help="Your question"),
         typer.echo(f"    \"{h.text}\"")
         typer.echo(f"    source: {h.link}")
 
-    typer.echo(f"\nShort answer:\n{a.interpretation}\n")
+    L = a.labels
+    typer.echo(f"\n{L['short_answer']}:\n{a.interpretation}\n")
     if a.reasoning:
-        typer.echo(f"Reasoning:\n{a.reasoning}\n")
-    typer.echo("Rules used (verbatim citations):")
+        typer.echo(f"{L['reasoning']}:\n{a.reasoning}\n")
+    typer.echo(f"{L['rules_used']}:")
     for i in a.used:
         cite(i)
     if a.considered:
-        typer.echo("\nRules considered:")
+        typer.echo(f"\n{L['rules_considered']}:")
         for i in a.considered:
             cite(i)
-    typer.echo(f"\nCertainty level: {a.certainty.upper()}" + (f" - {a.certainty_reason}" if a.certainty_reason else ""))
+    typer.echo(f"\n{L['certainty']}: {L.get(a.certainty, a.certainty.upper())}"
+               + (f" - {a.certainty_reason}" if a.certainty_reason else ""))
 
 
 @app.command()
 def changes(discipline: str = typer.Argument(..., help="e.g. PCC, Handgun, Rifle"),
             topic: str = typer.Option("", help="Only rules matching this topic, e.g. 'sight pictures'"),
             compare: str = typer.Option("", help="Two path substrings 'A|B' to compare explicit files (testing)"),
-            limit: int = typer.Option(40, help="Max rules shown")):
+            limit: int = typer.Option(40, help="Max rules shown"),
+            summary: bool = typer.Option(True, "--summary/--no-summary", help="LLM short summary on top")):
     """Show what changed between editions of a discipline's rulebook (green = new/changed, red = removed)."""
     from . import changes as chg
     con = store.connect()
@@ -127,7 +130,7 @@ def changes(discipline: str = typer.Argument(..., help="e.g. PCC, Handgun, Rifle
         rows = [dict(con.execute("SELECT * FROM docs WHERE rel_path LIKE ?", (f"%{p}%",)).fetchone())
                 for p in compare.split("|")]
         docs = sorted(rows, key=lambda d: (d["edition_year"], d["edition_month"], d["version"]))
-    chg.run_changes(con, discipline, topic, limit, typer.echo, docs)
+    chg.run_changes(con, discipline, topic, limit, typer.echo, docs, summary)
 
 
 if __name__ == "__main__":

@@ -248,7 +248,56 @@ def compare(con, docs: list, refs: set = None) -> tuple:
     return changes, renumbered
 
 
-def run_changes(con, discipline: str, topic: str = "", limit: int = 40, echo=typer.echo, explicit_docs: list = None):
+def _diff_brief(c, width=350) -> str:
+    """Compact description of one change for the LLM: only the words that differ between editions."""
+    if c.kind == "new":
+        return "NEW: " + c.versions[-1].text[:width]
+    if c.kind == "removed":
+        return "REMOVED: " + c.versions[0].text[:width]
+    a, b = _clean(c.versions[-2].text).split(), _clean(c.versions[-1].text).split()
+    sm = difflib.SequenceMatcher(None, [_mask(w) for w in a], [_mask(w) for w in b], autojunk=False)
+    parts = []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag != "equal":
+            parts.append(f"[was: {' '.join(a[i1:i2])[:width] or '-'}] [now: {' '.join(b[j1:j2])[:width] or '-'}]")
+    return "CHANGED: " + " ".join(parts)[:width * 2]
+
+
+SUMMARY_SYS = (
+    "You summarise differences between editions of IPSC rulebooks for Range Officers. You get numbered changes "
+    "(C1..Cn) showing only what differs. Use only that information; never invent rule text or numbers. "
+    "Ignore pure rewording or typo fixes unless the meaning changes. Respond with JSON only: "
+    '{"overview": "2-3 sentences on the main themes of the changes", '
+    '"points": [{"id": "C3", "change": "one plain sentence on what changed and why it matters in practice"}]} '
+    "List at most 12 points, the most significant first."
+)
+
+
+def summarize(found: list, editions: str, log=lambda m: None, limit=25, language="English"):
+    """Return (overview, [(Change, sentence)]) or None when the LLM is unavailable."""
+    from . import llm
+    chosen = sorted(found, key=lambda c: _ref_key(c.ref))[:limit]
+    brief = "\n".join(f"C{i}: Rule {c.ref}{' (renumbered)' if c.renumbered else ''} - {_diff_brief(c)}"
+                      for i, c in enumerate(chosen, 1))
+    try:
+        data = llm.complete_json(SUMMARY_SYS, f"Write the overview and points in {language}.\n"
+                                              f"Editions compared: {editions}\n\n{brief}", log)
+    except llm.LLMError as e:
+        log(f"  summary skipped ({e})")
+        return None
+    pts = []
+    for p in data.get("points", []) or []:
+        try:
+            n = int(str(p.get("id", "")).lstrip("Cc")) - 1
+        except ValueError:
+            continue
+        if 0 <= n < len(chosen) and p.get("change"):
+            pts.append((chosen[n], str(p["change"]).strip()))
+    return str(data.get("overview", "")).strip(), pts
+
+
+def run_changes(con, discipline: str, topic: str = "", limit: int = 40, echo=typer.echo, explicit_docs: list = None,
+                summary: bool = True, language: str = "English"):
     """Compare the editions of a discipline's rulebook and print the changes (shared by CLI and ask)."""
     from . import search as srch
     from .registry import detect_disciplines
@@ -267,7 +316,17 @@ def run_changes(con, discipline: str, topic: str = "", limit: int = 40, echo=typ
     found, renum = compare(con, docs, refs)
     echo(f"{len(found)} rule(s) differ in wording." + (f" Showing first {limit}." if len(found) > limit else ""))
     echo(f"({renum} further rule(s) were only renumbered/reformatted - not listed.)")
-    render(sorted(found, key=lambda c: _ref_key(c.ref))[:limit], echo)
+    shown = sorted(found, key=lambda c: _ref_key(c.ref))[:limit]
+    if summary and shown:
+        s = summarize(shown, " -> ".join(f"{d['edition_label']} v{d['version']}" for d in docs), echo,
+                      language=language)
+        if s:
+            overview, points = s
+            echo(f"\nSummary of changes:\n{overview}\n")
+            for c, text in points:
+                echo(f"- Rule {c.ref} [{c.kind.upper()}]: {text}")
+            echo("\nDetails with verbatim citations:")
+    render(shown, echo)
 
 
 def _ref_key(ref: str):

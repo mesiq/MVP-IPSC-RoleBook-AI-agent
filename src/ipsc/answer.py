@@ -12,7 +12,8 @@ PARSE_SYS = (
     "You prepare search queries for an IPSC rulebook retrieval system. Respond with JSON only: "
     '{"disciplines": [subset of ' + str(DISC_NAMES) + ' mentioned or clearly implied, else []], '
     '"search_query": "English keywords and any rule numbers, using official IPSC terminology", '
-    '"question": "the question rephrased clearly", '
+    '"question": "the question rephrased clearly in English", '
+    '"language": "English name of the language the user wrote in, e.g. English, German, Czech", '
     '"intent": "changes if the user asks what changed/is new/differs between rulebook editions or versions, '
     'otherwise answer", '
     '"topic": "for intent changes only: the specific subject asked about (e.g. sight pictures), or empty '
@@ -46,14 +47,26 @@ ANSWER_SYS = (
     "Certainty is 'high' only when a passage explicitly covers the exact situation described; if the situation "
     "involves facts the passages do not mention (e.g. a different action than the one the rule names), "
     "use 'medium' or 'low' and say what is missing. "
+    "LANGUAGE: the evidence is in English but the user may write in another language. Write short_answer, "
+    "reasoning, certainty_reason and every value of 'labels' in the language named in 'Answer language'. "
+    "Keep passage ids like [E2], rule numbers and the JSON keys unchanged. "
     "Respond with JSON only: "
     '{"short_answer": "1-2 sentence direct answer", '
     '"reasoning": "A descriptive explanation of 3-6 sentences in plain prose: state which passages apply '
     "(cite each as [E2] etc.), what each one says in your own words, how they combine (interpretations take "
     "priority over rules), any exceptions or conditions, and the conclusion drawn. Never write only ids.\", "
     '"used": ["E1", ...ids actually relied on], "considered": ["E5", ...ids relevant but not decisive], '
-    '"certainty": "high|medium|low", "certainty_reason": "one sentence"}'
+    '"certainty": "high|medium|low", "certainty_reason": "one sentence", '
+    '"labels": {"short_answer": "Short answer", "reasoning": "Reasoning", '
+    '"rules_used": "Rules used (verbatim citations)", "rules_considered": "Rules considered", '
+    '"certainty": "Certainty level", "high": "HIGH", "medium": "MEDIUM", "low": "LOW"}} '
+    "The 'labels' values above are English: translate each one into the answer language "
+    "(keep them as they are only when the answer language is English)."
 )
+
+DEFAULT_LABELS = {"short_answer": "Short answer", "reasoning": "Reasoning",
+                  "rules_used": "Rules used (verbatim citations)", "rules_considered": "Rules considered",
+                  "certainty": "Certainty level", "high": "HIGH", "medium": "MEDIUM", "low": "LOW"}
 
 
 @dataclass
@@ -68,6 +81,8 @@ class Answer:
     search_query: str = ""
     intent: str = "answer"
     topic: str = ""
+    language: str = "English"
+    labels: dict = field(default_factory=lambda: dict(DEFAULT_LABELS))
     result: object = None
 
 
@@ -103,10 +118,12 @@ def ask(con, question: str, discipline: str = "", top: int = 8, log=lambda m: No
     """Returns (Answer, evidence_items). evidence_items[i] corresponds to id E{i+1}."""
     discs = detect_disciplines(discipline) if discipline else None
     query = question
+    language = "English"
     intent, topic = "answer", ""
     try:
         p = llm.complete_json(PARSE_SYS, question, log)
-        query = p.get("search_query") or question
+        language = str(p.get("language") or "English").strip() or "English"
+        query = p.get("search_query") or p.get("question") or question
         intent = "changes" if str(p.get("intent", "")).lower() == "changes" else "answer"
         topic = clean_topic(str(p.get("topic") or ""))
         if not discs:
@@ -118,17 +135,21 @@ def ask(con, question: str, discipline: str = "", top: int = 8, log=lambda m: No
             intent = "changes"
 
     if intent == "changes":
-        return Answer(disciplines=discs or [], search_query=query, intent="changes", topic=topic), []
+        return Answer(disciplines=discs or [], search_query=query, intent="changes", topic=topic,
+                      language=language), []
 
-    res = srch.search(con, f"{question} {query}" if query != question else question, discs, top)
+    # Rules are English: a non-English question is searched only through its English translation.
+    english = language.lower().startswith("english")
+    res = srch.search(con, f"{question} {query}" if english and query != question else query, discs, top)
     items = _evidence(res)
-    ans = Answer(disciplines=res.disciplines, search_query=query, result=res)
+    ans = Answer(disciplines=res.disciplines, search_query=query, language=language, result=res)
     if not items:
         ans.interpretation = "No relevant passages found in the indexed documents."
         return ans, items
 
     try:
-        data = llm.complete_json(ANSWER_SYS, f"Question: {question}\n\nEvidence:\n{format_evidence(items)}", log)
+        data = llm.complete_json(
+            ANSWER_SYS, f"Answer language: {language}\nQuestion: {question}\n\nEvidence:\n{format_evidence(items)}", log)
     except llm.LLMError as e:
         ans.interpretation = f"LLM unavailable ({e}). Showing retrieved passages only."
         ans.considered = list(range(len(items)))
@@ -151,7 +172,7 @@ def ask(con, question: str, discipline: str = "", top: int = 8, log=lambda m: No
             return m.group(0)
         h = items[n]
         if h.doc_type == "rule":
-            return f"Rule {h.ref}"
+            return f"Rule {h.ref}" if english else h.ref  # the answer text already carries the local word for "rule"
         if h.doc_type == "interpretation":
             return f"{h.ref} ({h.edition_label})"
         return f"Manual {h.ref}"
@@ -168,6 +189,9 @@ def ask(con, question: str, discipline: str = "", top: int = 8, log=lambda m: No
     cert = str(data.get("certainty", "low")).lower()
     ans.certainty = cert if cert in ("high", "medium", "low") else "low"
     ans.certainty_reason = humanize(str(data.get("certainty_reason", "")).strip())
+    labels = data.get("labels")
+    if isinstance(labels, dict):
+        ans.labels.update({k: str(v).strip() for k, v in labels.items() if k in DEFAULT_LABELS and str(v).strip()})
     # Without any cited evidence the conclusion cannot be trusted.
     if not ans.used:
         ans.certainty = "low"

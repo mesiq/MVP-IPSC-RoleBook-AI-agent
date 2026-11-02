@@ -5,8 +5,4 @@ __pycache__/
 *.egg-info/
 .vscode/
 *.py[cod]
-
-# Ignore everything inside source_data
-source_data/**
-# But keep directories
-!source_data/**/
+source_data/
