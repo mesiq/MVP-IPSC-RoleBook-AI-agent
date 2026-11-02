@@ -19,14 +19,14 @@
     <h2>{{ labels.reasoning }}</h2>
     <p>{{ result.reasoning }}</p>
   {% endif %}
+  <p class="certainty level-{{ result.certainty }}">
+    <strong>{{ labels.certainty }}:</strong> {{ labels.get(result.certainty, result.certainty | upper) }}
+    {% if result.certainty_reason %}<span class="muted"> &ndash; {{ result.certainty_reason }}</span>{% endif %}
+  </p>
   <h2>{{ labels.rules_used }}</h2>
   {% for c in result.used %}{{ citation(c) }}{% else %}<p class="muted">&mdash;</p>{% endfor %}
   {% if result.considered %}
     <h2>{{ labels.rules_considered }}</h2>
     {% for c in result.considered %}{{ citation(c) }}{% endfor %}
   {% endif %}
-  <p class="certainty level-{{ result.certainty }}">
-    <strong>{{ labels.certainty }}:</strong> {{ labels.get(result.certainty, result.certainty | upper) }}
-    {% if result.certainty_reason %}<span class="muted"> &ndash; {{ result.certainty_reason }}</span>{% endif %}
-  </p>
 </div>

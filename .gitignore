@@ -30,3 +30,6 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+
+web.err.txt
+web.out.txt

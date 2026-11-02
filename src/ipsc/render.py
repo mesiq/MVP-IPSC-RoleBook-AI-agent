@@ -55,6 +55,10 @@ def print_answer(answer: Answer, evidence: list, echo: Echo) -> None:
     if answer.reasoning:
         echo(f"{labels['reasoning']}:\n{answer.reasoning}\n")
 
+    level = labels.get(answer.certainty, answer.certainty.upper())
+    reason = f" - {answer.certainty_reason}" if answer.certainty_reason else ""
+    echo(f"{labels['certainty']}: {level}{reason}\n")
+
     echo(f"{labels['rules_used']}:")
     for number in answer.used:
         print_citation(evidence[number], echo)
@@ -62,7 +66,3 @@ def print_answer(answer: Answer, evidence: list, echo: Echo) -> None:
         echo(f"\n{labels['rules_considered']}:")
         for number in answer.considered:
             print_citation(evidence[number], echo)
-
-    level = labels.get(answer.certainty, answer.certainty.upper())
-    reason = f" - {answer.certainty_reason}" if answer.certainty_reason else ""
-    echo(f"\n{labels['certainty']}: {level}{reason}")

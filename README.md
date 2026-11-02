@@ -18,12 +18,12 @@ No ...
 Reasoning:
 Rule 8.7.1 states that ...
 
+Certainty level: HIGH - The rule directly covers the exact situation.
+
 Rules used (verbatim citations):
 - Rule 8.7.1  [Jan 2026, p.27]
     "Competitors are prohibited from taking a sight picture and/or dry firing prior to the Start Signal. ..."
     source: file:///.../IPSC Handgun ... .pdf#page=33
-
-Certainty level: HIGH - The rule directly covers the exact situation.
 ```
 
 ## Setup (Windows, Python 3.12)
