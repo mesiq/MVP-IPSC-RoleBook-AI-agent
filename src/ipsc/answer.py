@@ -12,8 +12,29 @@ PARSE_SYS = (
     "You prepare search queries for an IPSC rulebook retrieval system. Respond with JSON only: "
     '{"disciplines": [subset of ' + str(DISC_NAMES) + ' mentioned or clearly implied, else []], '
     '"search_query": "English keywords and any rule numbers, using official IPSC terminology", '
-    '"question": "the question rephrased clearly"}'
+    '"question": "the question rephrased clearly", '
+    '"intent": "changes if the user asks what changed/is new/differs between rulebook editions or versions, '
+    'otherwise answer", '
+    '"topic": "for intent changes only: the specific subject asked about (e.g. sight pictures), or empty '
+    'if they want all changes"}'
 )
+
+CHANGE_WORDS = re.compile(r"\b(chang\w*|differen\w*|what.?s new|updated?|new rules?|revised|revision)\b", re.I)
+EDITION_WORDS = re.compile(r"\b(rule ?books?|editions?|versions?|latest|recent|newest|compared|since)\b", re.I)
+
+
+GENERIC_TOPIC = re.compile(r"\b(rule ?books?|rules?|editions?|versions?|latest|recent|newest|ipsc|competition|"
+                           r"handgun|pcc|pistol caliber carbine|rifle|shotgun|mini rifle|22\s?lr|changes?|changed|new|"
+                           r"revisions?|revised|updates?|updated|modifications?|amendments?|differences?)\b", re.I)
+
+
+def clean_topic(topic: str) -> str:
+    """A topic that only names the rulebook/discipline means 'everything'."""
+    return "" if not GENERIC_TOPIC.sub(" ", topic or "").strip(" ,.-") else topic.strip()
+
+
+def looks_like_change_question(q: str) -> bool:
+    return bool(CHANGE_WORDS.search(q) and EDITION_WORDS.search(q))
 
 ANSWER_SYS = (
     "You assist IPSC Range Officers. Answer ONLY from the numbered evidence passages. "
@@ -45,6 +66,8 @@ class Answer:
     certainty_reason: str = ""
     disciplines: list = field(default_factory=list)
     search_query: str = ""
+    intent: str = "answer"
+    topic: str = ""
     result: object = None
 
 
@@ -80,14 +103,22 @@ def ask(con, question: str, discipline: str = "", top: int = 8, log=lambda m: No
     """Returns (Answer, evidence_items). evidence_items[i] corresponds to id E{i+1}."""
     discs = detect_disciplines(discipline) if discipline else None
     query = question
+    intent, topic = "answer", ""
     try:
         p = llm.complete_json(PARSE_SYS, question, log)
         query = p.get("search_query") or question
+        intent = "changes" if str(p.get("intent", "")).lower() == "changes" else "answer"
+        topic = clean_topic(str(p.get("topic") or ""))
         if not discs:
             discs = [d for d in p.get("disciplines", []) if d in DISC_NAMES] or detect_disciplines(question)
     except llm.LLMError as e:
         log(f"  query parsing skipped ({e}); using raw question")
         discs = discs or detect_disciplines(question)
+        if looks_like_change_question(question):
+            intent = "changes"
+
+    if intent == "changes":
+        return Answer(disciplines=discs or [], search_query=query, intent="changes", topic=topic), []
 
     res = srch.search(con, f"{question} {query}" if query != question else question, discs, top)
     items = _evidence(res)

@@ -4,7 +4,7 @@ import pymupdf
 
 from . import chunker, store
 from .config import DATA_DIR, TIER
-from .registry import DocMeta, edition_from_pdf, scan
+from .registry import DocMeta, detect_disciplines, edition_from_pdf, scan
 
 
 def sha256(path) -> str:
@@ -45,6 +45,8 @@ def ingest_all(con, force=False, log=print, embed=True):
         year, month = edition_from_pdf(doc)
         if year:
             meta.edition_year, meta.edition_month, meta.date_source = year, month, "pdf"
+        if meta.doc_type == "rule" and not meta.disciplines:
+            meta.disciplines = detect_disciplines(" ".join(doc[0].get_text().split()))
         chunks = build_chunks(meta, doc)
         store.insert_doc(con, meta, TIER[meta.doc_type], len(doc), digest, chunks)
         con.commit()

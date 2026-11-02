@@ -80,6 +80,16 @@ def ask(question: str = typer.Argument(..., help="Your question"),
     from . import answer as ans_mod
     con = store.connect()
     a, items = ans_mod.ask(con, question, discipline, top, log=typer.echo)
+    if a.intent == "changes":
+        from . import changes as chg
+        typer.echo(f"Detected a 'what changed' question - comparing rulebook editions "
+                   f"({a.disciplines[0] if a.disciplines else 'no discipline'}"
+                   f"{', topic: ' + a.topic if a.topic else ''}).\n")
+        if not a.disciplines:
+            typer.echo("Please name the discipline (Handgun, PCC, Rifle, Shotgun, Mini Rifle, 22LR Handgun).")
+            return
+        chg.run_changes(con, a.disciplines[0], a.topic, 40, typer.echo)
+        return
     if debug:
         typer.echo(f"[debug] disciplines={a.disciplines} query={a.search_query!r}")
 
@@ -111,30 +121,13 @@ def changes(discipline: str = typer.Argument(..., help="e.g. PCC, Handgun, Rifle
             limit: int = typer.Option(40, help="Max rules shown")):
     """Show what changed between editions of a discipline's rulebook (green = new/changed, red = removed)."""
     from . import changes as chg
-    from . import search as srch
-    from .registry import detect_disciplines
     con = store.connect()
+    docs = None
     if compare:
-        pats = compare.split("|")
-        rows = [dict(con.execute("SELECT * FROM docs WHERE rel_path LIKE ?", (f"%{p}%",)).fetchone()) for p in pats]
+        rows = [dict(con.execute("SELECT * FROM docs WHERE rel_path LIKE ?", (f"%{p}%",)).fetchone())
+                for p in compare.split("|")]
         docs = sorted(rows, key=lambda d: (d["edition_year"], d["edition_month"], d["version"]))
-    else:
-        discs = detect_disciplines(discipline)
-        docs = chg.rulebook_editions(con, discs)
-    if len(docs) < 2:
-        typer.echo(f"Only {len(docs)} edition(s) of the {discipline} rulebook are indexed - nothing to compare yet.\n"
-                   "Add the older/newer PDF to the Rules folder and run 'ipsc ingest'.")
-        return
-    typer.echo("Editions compared: " + " -> ".join(f"{d['edition_label']} v{d['version']}" for d in docs))
-    refs = None
-    if topic:
-        res = srch.search(con, topic, detect_disciplines(discipline) or None, 15)
-        refs = {h.ref for h in res.rules}
-        typer.echo(f"Topic '{topic}': checking rules {', '.join(sorted(refs))}")
-    found, renum = chg.compare(con, docs, refs)
-    typer.echo(f"{len(found)} rule(s) differ in wording." + (f" Showing first {limit}." if len(found) > limit else ""))
-    typer.echo(f"({renum} further rule(s) were only renumbered/reformatted - not listed.)")
-    chg.render(sorted(found, key=lambda c: chg._ref_key(c.ref))[:limit])
+    chg.run_changes(con, discipline, topic, limit, typer.echo, docs)
 
 
 if __name__ == "__main__":

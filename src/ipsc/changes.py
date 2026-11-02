@@ -15,6 +15,7 @@ import typer
 
 NUM = re.compile(r"\b\d{1,2}(?:\.\d{1,2}){1,5}\b")
 SPLIT_NUM = re.compile(r"(\d\.)\s+(?=\d)")
+HEAD_NUM = re.compile(r"(?<![\d.])\d{1,2}\.(?=\s+[A-Z][a-z])")
 
 
 def _clean(text: str) -> str:
@@ -53,7 +54,9 @@ class Change:
 
 
 def _tokens(text: str) -> list:
-    t = NUM.sub("#", _clean(text).lower())
+    # a trailing section-heading number such as "... 18. Aftermarket parts" is page furniture, not wording
+    text = HEAD_NUM.sub("#", _clean(text))
+    t = NUM.sub("#", text.lower())
     return re.sub(r"[^a-z0-9#\s]", " ", t).split()
 
 
@@ -75,6 +78,8 @@ def _load(con, doc_id) -> list:
     for r in con.execute("SELECT ref, text, page_pdf, page_label, embedding FROM chunks "
                          "WHERE doc_id=? AND ref!='p1' ORDER BY id", (doc_id,)):
         n = _norm(r["text"])
+        if r["ref"].startswith("Appendix"):
+            continue  # appendices are not compared between editions
         if not n or n in PLACEHOLDERS:
             continue
         vec = np.frombuffer(r["embedding"], dtype=np.float32) if r["embedding"] else None
@@ -241,6 +246,28 @@ def compare(con, docs: list, refs: set = None) -> tuple:
         changes.append(Change(newest.ref if kind != "removed" else vs[0][1].ref, kind, [v for _, v in vs],
                               renumbered=len({v.ref for _, v in vs}) > 1))
     return changes, renumbered
+
+
+def run_changes(con, discipline: str, topic: str = "", limit: int = 40, echo=typer.echo, explicit_docs: list = None):
+    """Compare the editions of a discipline's rulebook and print the changes (shared by CLI and ask)."""
+    from . import search as srch
+    from .registry import detect_disciplines
+    discs = detect_disciplines(discipline)
+    docs = explicit_docs or (rulebook_editions(con, discs) if discs else [])
+    if len(docs) < 2:
+        echo(f"Only {len(docs)} edition(s) of the {discipline} rulebook are indexed - nothing to compare yet.\n"
+             "Add the older/newer PDF to source_data\\Rules and run 'ipsc ingest'.")
+        return
+    echo("Editions compared: " + " -> ".join(f"{d['edition_label']} v{d['version']}" for d in docs))
+    refs = None
+    if topic:
+        res = srch.search(con, topic, discs or None, 15)
+        refs = {h.ref for h in res.rules}
+        echo(f"Topic '{topic}': checking rules {', '.join(sorted(refs))}")
+    found, renum = compare(con, docs, refs)
+    echo(f"{len(found)} rule(s) differ in wording." + (f" Showing first {limit}." if len(found) > limit else ""))
+    echo(f"({renum} further rule(s) were only renumbered/reformatted - not listed.)")
+    render(sorted(found, key=lambda c: _ref_key(c.ref))[:limit], echo)
 
 
 def _ref_key(ref: str):
