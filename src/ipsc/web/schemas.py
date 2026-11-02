@@ -3,6 +3,13 @@ from pydantic import BaseModel
 
 from ..answer import Answer
 from ..changes import ChangeReport, version_segments
+from ..search import rule_family
+
+
+class Part(BaseModel):
+    ref: str
+    text: str
+    cited: bool  # the passage the answer relied on
 
 
 class Citation(BaseModel):
@@ -16,6 +23,7 @@ class Citation(BaseModel):
     link: str
     note: str = ""
     section: str = ""  # headings the rule sits under (often carry the penalty)
+    parts: list[Part] = []  # whole rule with its sub-rules; the cited one is marked (empty = just `text`)
 
 
 class AnswerOut(BaseModel):
@@ -73,19 +81,24 @@ class SourceOut(BaseModel):
     link: str
 
 
-def to_citation(hit) -> Citation:
+def to_citation(hit, con=None) -> Citation:
+    parts = []
+    if con is not None and hit.doc_type == "rule":
+        family = rule_family(con, hit)
+        if len(family) > 1:
+            parts = [Part(ref=ref, text=text, cited=chunk_id == hit.id) for chunk_id, ref, text in family]
     return Citation(kind=hit.doc_type, ref=hit.ref, title=hit.title, text=hit.text, edition=hit.edition_label,
                     page=hit.page_label, link=hit.link, note=hit.edition_note,
-                    section=hit.context if hit.doc_type == "rule" else "")
+                    section=hit.context if hit.doc_type == "rule" else "", parts=parts)
 
 
-def to_answer(answer: Answer, evidence: list) -> AnswerOut:
+def to_answer(answer: Answer, evidence: list, con=None) -> AnswerOut:
     return AnswerOut(
         short_answer=answer.short_answer, reasoning=answer.reasoning, certainty=answer.certainty,
         certainty_reason=answer.certainty_reason, labels=answer.labels, language=answer.language,
         disciplines=answer.disciplines,
-        used=[to_citation(evidence[n]) for n in answer.used],
-        considered=[to_citation(evidence[n]) for n in answer.considered])
+        used=[to_citation(evidence[n], con) for n in answer.used],
+        considered=[to_citation(evidence[n], con) for n in answer.considered])
 
 
 def to_changes(report: ChangeReport) -> ChangesOut:

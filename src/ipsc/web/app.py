@@ -50,7 +50,7 @@ def answer_question(db_path: Path, question: str, discipline: str) -> AnswerOut 
     with closing(open_db(db_path)) as con:
         answer, evidence = answer_module.ask(con, question, discipline)
         if answer.intent != "changes":
-            return to_answer(answer, evidence)
+            return to_answer(answer, evidence, con)
         if not answer.disciplines:
             raise Problem(NEED_DISCIPLINE)
         report = changes_module.build_report(con, answer.disciplines[0], answer.topic, language=answer.language,
@@ -90,7 +90,7 @@ def create_app(db_path: Path = config.DB_PATH, data_dir: Path = config.DATA_DIR)
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if not db_path.exists():
-            raise RuntimeError(f"No database at {db_path}. Run 'ipsc ingest' first.")
+            raise RuntimeError(f"No database at {db_path}. Run 'ipsc-ingest' first.")
         if not config.PUBLIC_URL:
             config.PUBLIC_URL = "/files"  # citations link to the PDFs served by this app
         embed.warm_up()

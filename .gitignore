@@ -24,12 +24,19 @@ htmlcov/
 
 # Embedding model cache
 .fastembed_cache/
+cache/
+
+# Runtime leftovers (logs, SQLite journals)
+*.log
+web.out.txt
+web.err.txt
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+*.deleteme
 
 # Editors and OS
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
-
-web.err.txt
-web.out.txt

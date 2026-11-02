@@ -6,6 +6,7 @@ POOL = 60  # How many candidates keyword search and vector search each contribut
 # Multiplies a hit's score by its document type. Interpretations override rules, manuals are guidance.
 TIER_BOOST = {3: 1.5, 2: 1.0, 1: 0.7}  # 3 = interpretation, 2 = rule, 1 = manual
 RELATED_FOR = 3  # For this many top rule hits, also fetch the parent rule and sub-rules.
+MAX_FAMILY = 25  # Max passages shown when a citation displays its whole rule with all sub-rules.
 MAX_SUBRULES = 3  # Max sub-rules fetched per rule (e.g. 10.5.3 -> 10.5.3.1, 10.5.3.2 ...).
 
 # --- Evidence sent to the LLM (evidence.py) -------------------------------------------------------

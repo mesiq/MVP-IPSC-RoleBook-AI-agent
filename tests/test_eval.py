@@ -1,6 +1,6 @@
-﻿"""Retrieval evaluation: each question must surface at least one expected rule/interpretation reference.
+"""Retrieval evaluation: each question must surface at least one expected rule/interpretation reference.
 
-Requires the indexed database (`ipsc ingest`). Run with: pytest -m eval
+Requires the indexed database (`ipsc-ingest`). Run with: pytest -m eval
 """
 import pytest
 
@@ -34,7 +34,7 @@ CASES = [
 @pytest.fixture(scope="module")
 def con():
     if not DB_PATH.exists():
-        pytest.skip("no index; run `ipsc ingest`")
+        pytest.skip("no index; run `ipsc-ingest`")
     return store.connect()
 
 

@@ -32,7 +32,7 @@ Question: *"Can a shooter take a sight picture with a loaded handgun?"*
 | 3 | `evidence.build_evidence` | The best ~10 passages (+ context) are numbered `[E1]...` and cut to fit the LLM budget |
 | 4 | `answer.ask` | The LLM reads the passages and returns JSON: short answer, reasoning, `used: ["E1"]`, certainty |
 | 5 | `certainty.check_certainty` | If the LLM says "high" but the cited passage shares too few words with the question, it becomes "medium" |
-| 6 | `render.print_answer` | `[E1]` in the text becomes "Rule 8.7.1"; the cited chunks are printed verbatim with page and link |
+| 6 | `answer.py` | `[E1]` in the text becomes "Rule 8.7.1"; the cited chunks are printed verbatim with page and link |
 
 If the LLM is unreachable in step 1, simple keyword rules are used; if it is unreachable in step 4, the
 retrieved passages are still shown.
@@ -45,7 +45,7 @@ never translated.
 
 ## "What changed" questions
 
-`question.py` detects the intent (LLM, or keyword fallback). `changes.py` returns a `ChangeReport` (plain data); `render.py` prints it in the terminal and the web templates
+`question.py` detects the intent (LLM, or keyword fallback). `changes.py` returns a `ChangeReport` (plain data); the web templates show it
 show the same data as HTML.
 
 1. loads all editions of the discipline's rulebook (exactly the same discipline set), oldest to newest;
@@ -60,7 +60,7 @@ A reworded rule can show up as removed + new. That is accepted.
 
 ## Ingest
 
-`ipsc ingest` reads each PDF with its sidecar (`registry.py`), skips unchanged files (SHA-256 and metadata
+`ipsc-ingest` reads each PDF with its sidecar (`registry.py`), skips unchanged files (SHA-256 and metadata
 compared), splits the PDF into chunks (`chunker.py`: numbered rules, interpretations, manuals), stores them in
 SQLite with a full-text index (`store.py`) and computes embeddings (`embed.py`, `bge-small-en-v1.5` on CPU).
 

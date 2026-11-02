@@ -1,11 +1,13 @@
 {% macro citation(c) %}
-<article class="citation">
+<article class="citation{{ ' with-parts' if c.parts }}">
   <h4>
     {% if c.kind == "rule" %}Rule {{ c.ref }}{% elif c.kind == "manual" %}Manual {{ c.ref }}{% else %}{{ c.ref }}: {{ c.title }}{% endif %}
     <span class="meta">{{ c.edition }}, p.{{ c.page }}</span>
   </h4>
   {% if c.section %}<p class="meta">Section: {{ c.section }}</p>{% endif %}
-  <blockquote>{{ c.text }}</blockquote>
+  {% if c.parts %}
+  <blockquote class="family">{% for p in c.parts %}<p class="{{ 'cited' if p.cited }}"><strong>{{ p.ref }}</strong> {{ p.text }}</p>{% endfor %}</blockquote>
+  {% else %}<blockquote>{{ c.text }}</blockquote>{% endif %}
   {% if c.note %}<p class="note">Note: {{ c.note }}</p>{% endif %}
   <a class="source" href="{{ c.link }}" target="_blank" rel="noopener">Open source PDF</a>
 </article>

@@ -2,7 +2,7 @@
 name = "ipsc-rulebook-agent"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["pymupdf", "fastembed", "numpy", "typer", "python-dotenv", "httpx",
+dependencies = ["pymupdf", "fastembed", "numpy", "python-dotenv", "httpx",
                 "fastapi", "uvicorn", "jinja2", "python-multipart"]
 
 [project.optional-dependencies]
@@ -18,10 +18,10 @@ select = ["E", "F", "I"]  # style errors, unused code, import order
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-m 'not eval'"
-markers = ["eval: retrieval evaluation against the indexed database (needs `ipsc ingest` first)"]
+markers = ["eval: retrieval evaluation against the indexed database (needs `ipsc-ingest` first)"]
 
 [project.scripts]
-ipsc = "ipsc.cli:app"
+ipsc-ingest = "ipsc.ingest:main"
 ipsc-web = "ipsc.web.app:main"
 
 [build-system]

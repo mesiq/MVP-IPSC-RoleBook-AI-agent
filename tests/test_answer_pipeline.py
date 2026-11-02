@@ -1,5 +1,5 @@
 """End-to-end `ask()` with a fake LLM and fake search: runs offline, shows question in -> answer out."""
-from ipsc import answer, llm, render
+from ipsc import answer, llm
 from ipsc.search import Result
 
 
@@ -24,9 +24,6 @@ def test_ask_returns_verbatim_rule_with_readable_reasoning(monkeypatch, make_hit
     assert [evidence[n].text for n in result.used] == ["Competitors are prohibited from taking a sight picture."]
     assert result.certainty == "high"
 
-    printed = []
-    render.print_answer(result, evidence, printed.append)
-    assert any('"Competitors are prohibited from taking a sight picture."' in line for line in printed)
 
 
 def test_ask_routes_change_questions_to_the_comparison_tool(monkeypatch):

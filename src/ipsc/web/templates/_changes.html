@@ -1,6 +1,6 @@
 <div class="changes">
 {% if result.notice %}
-  <p class="notice">{{ result.notice }} Add the older/newer PDF to the source folder and run <code>ipsc ingest</code>.</p>
+  <p class="notice">{{ result.notice }} Add the older/newer PDF to the source folder and run <code>ipsc-ingest</code>.</p>
 {% else %}
   <p class="muted">Editions compared: {{ result.editions | join(" → ") }}</p>
   <p>{{ result.total }} rule(s) differ in wording{% if result.total > result.changes | length %}; showing the first {{ result.changes | length }}{% endif %}.

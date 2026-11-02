@@ -1,4 +1,5 @@
-﻿import hashlib
+import argparse
+import hashlib
 import json
 
 import pymupdf
@@ -57,3 +58,14 @@ def ingest_all(con, force=False, log=print, embed=True):
 
 
 
+
+
+def main() -> None:
+    """Command `ipsc-ingest`: (re)build the search index from the PDFs in the data folder."""
+    parser = argparse.ArgumentParser(description="Scan the source folder and (re)build the chunk database.")
+    parser.add_argument("--force", action="store_true", help="re-ingest unchanged files too")
+    ingest_all(store.connect(), force=parser.parse_args().force)
+
+
+if __name__ == "__main__":
+    main()

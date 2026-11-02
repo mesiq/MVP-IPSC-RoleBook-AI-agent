@@ -8,7 +8,7 @@ import numpy as np
 from . import embed
 from .config import source_link
 from .registry import detect_disciplines
-from .settings import MAX_SUBRULES, POOL, RELATED_FOR, RRF_K, TIER_BOOST
+from .settings import MAX_FAMILY, MAX_SUBRULES, POOL, RELATED_FOR, RRF_K, TIER_BOOST
 
 # Common words ignored by the keyword search.
 STOP = set(
@@ -270,6 +270,28 @@ def search(con, query: str, disciplines: list = None, top_k: int = 8) -> Result:
     for rule in rules[:RELATED_FOR]:
         rule.related = _related(con, rule)
     return Result(disciplines, interps, rules, manuals)
+
+
+def rule_family(con, hit: Hit) -> list:
+    """The whole rule a passage belongs to, as (id, ref, text) in document order.
+
+    A sub-rule such as 4.2.3.1 is part of rule 4.2.3, so the reader needs the full rule around it. The root is the
+    topmost stored ancestor with at least three number levels (chapter and section headings are not rules).
+    """
+    doc = con.execute("SELECT id FROM docs WHERE rel_path=?", (hit.rel_path,)).fetchone()
+    if not doc:
+        return [(hit.id, hit.ref, hit.text)]
+    root = hit.ref
+    parts = hit.ref.split(".")
+    for size in range(3, len(parts)):
+        candidate = ".".join(parts[:size])
+        if con.execute("SELECT 1 FROM chunks WHERE doc_id=? AND ref=? LIMIT 1", (doc["id"], candidate)).fetchone():
+            root = candidate
+            break
+    rows = con.execute("SELECT id, ref, text FROM chunks WHERE doc_id=? AND (ref=? OR ref LIKE ?) ORDER BY id "
+                       "LIMIT ?", (doc["id"], root, root + ".%", MAX_FAMILY)).fetchall()
+    family = [(r["id"], r["ref"], r["text"]) for r in rows]
+    return family if any(part[0] == hit.id for part in family) else [(hit.id, hit.ref, hit.text)]
 
 
 def _related(con, rule: Hit) -> list:
