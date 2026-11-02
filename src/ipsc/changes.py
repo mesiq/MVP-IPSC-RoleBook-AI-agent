@@ -38,8 +38,7 @@ class Version:
 
     @property
     def label(self) -> str:
-        v = f" v{self.doc['version']}" if self.doc["version"] > 1 else ""
-        return f"{self.doc['edition_label']}{v}"
+        return self.doc['edition_label']
 
     @property
     def link(self) -> str:
@@ -70,7 +69,7 @@ def rulebook_editions(con, disciplines: list) -> list:
     want = sorted(disciplines)
     docs = [dict(r) for r in con.execute("SELECT * FROM docs WHERE doc_type='rule'")]
     docs = [d for d in docs if sorted(json.loads(d["disciplines"])) == want]
-    docs.sort(key=lambda d: (d["edition_year"], d["edition_month"], d["version"]))
+    docs.sort(key=lambda d: (d["edition_year"], d["edition_month"]))
     return docs
 
 
@@ -308,7 +307,7 @@ def run_changes(con, discipline: str, topic: str = "", limit: int = 40, echo=typ
         echo(f"Only {len(docs)} edition(s) of the {discipline} rulebook are indexed - nothing to compare yet.\n"
              "Add the older/newer PDF to source_data\\Rules and run 'ipsc ingest'.")
         return
-    echo("Editions compared: " + " -> ".join(f"{d['edition_label']} v{d['version']}" for d in docs))
+    echo("Editions compared: " + " -> ".join(f"{d['edition_label']}" for d in docs))
     refs = None
     if topic:
         res = srch.search(con, topic, discs or None, 15)
@@ -319,7 +318,7 @@ def run_changes(con, discipline: str, topic: str = "", limit: int = 40, echo=typ
     echo(f"({renum} further rule(s) were only renumbered/reformatted - not listed.)")
     shown = sorted(found, key=lambda c: _ref_key(c.ref))[:limit]
     if summary and shown:
-        s = summarize(shown, " -> ".join(f"{d['edition_label']} v{d['version']}" for d in docs), echo,
+        s = summarize(shown, " -> ".join(f"{d['edition_label']}" for d in docs), echo,
                       language=language)
         if s:
             overview, points = s

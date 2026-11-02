@@ -1,4 +1,4 @@
-﻿import difflib
+import difflib
 import json
 import re
 from dataclasses import dataclass, field
@@ -60,7 +60,7 @@ def _active_docs(con, disciplines):
     rule_docs = [d for d in docs if d["doc_type"] == "rule"]
     latest = {}  # newest rulebook per discipline set
     for d in rule_docs:
-        key = (d["edition_year"], d["edition_month"], d["version"])
+        key = (d["edition_year"], d["edition_month"])
         k = d["disciplines"]
         if k not in latest or key > latest[k][0]:
             latest[k] = (key, d)
@@ -232,7 +232,7 @@ def search(con, query: str, disciplines: list = None, top_k: int = 8) -> Result:
     # Attach every applicable interpretation (any edition) to each rule hit; newest first.
     all_interps = list(_load(con, [r[0] for r in con.execute(
         "SELECT c.id FROM chunks c JOIN docs d ON d.id=c.doc_id WHERE d.doc_type='interpretation'")]).values())
-    ed = {d["rel_path"]: (d["edition_year"], d["edition_month"], d["version"]) for d in docs}
+    ed = {d["rel_path"]: (d["edition_year"], d["edition_month"]) for d in docs}
     all_interps.sort(key=lambda h: ed.get(h.rel_path, (0, 0, 0)), reverse=True)
     for rule in rules:
         for it in all_interps:
@@ -252,8 +252,7 @@ def search(con, query: str, disciplines: list = None, top_k: int = 8) -> Result:
             if it.id not in seen:
                 interps.append(it)
                 seen.add(it.id)
-    interps.sort(key=lambda h: (-ed.get(h.rel_path, (0, 0, 0))[0], -ed.get(h.rel_path, (0, 0, 0))[1],
-                                -ed.get(h.rel_path, (0, 0, 0))[2], -h.score))
+    interps.sort(key=lambda h: (*(-n for n in ed.get(h.rel_path, (0, 0))), -h.score))
     for rule in rules[:RELATED_FOR]:
         rule.related = _related(con, rule)
     return Result(disciplines, interps, rules, manuals)

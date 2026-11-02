@@ -17,11 +17,11 @@ def ingest(force: bool = typer.Option(False, help="Re-ingest unchanged files")):
 
 @app.command()
 def sources():
-    """List indexed documents and the metadata derived from their names."""
+    """List indexed documents and their sidecar metadata."""
     con = store.connect()
     for r in con.execute("SELECT * FROM docs ORDER BY tier DESC, doc_type, edition_year DESC, edition_month DESC"):
         d = ", ".join(json.loads(r["disciplines"])) or "all"
-        typer.echo(f"{r['doc_type']:<14} {d:<14} {r['edition_label']:<14} v{r['version']} "
+        typer.echo(f"{r['doc_type']:<14} {d:<14} {r['edition_label']:<14} "
                    f"{r['pages']:>3}p {r['n_chunks']:>4} chunks  {r['rel_path']}")
 
 
@@ -109,7 +109,7 @@ def changes(discipline: str = typer.Argument(..., help="e.g. PCC, Handgun, Rifle
     if compare:
         rows = [dict(con.execute("SELECT * FROM docs WHERE rel_path LIKE ?", (f"%{p}%",)).fetchone())
                 for p in compare.split("|")]
-        docs = sorted(rows, key=lambda d: (d["edition_year"], d["edition_month"], d["version"]))
+        docs = sorted(rows, key=lambda d: (d["edition_year"], d["edition_month"]))
     chg.run_changes(con, discipline, topic, limit, typer.echo, docs, summary)
 
 

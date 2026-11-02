@@ -39,8 +39,6 @@ class DocMeta:
     disciplines: list = field(default_factory=list)  # [] = all / not specific
     edition_year: int = 0
     edition_month: int = 0
-    version: int = 1
-    title: str = ""
 
     @property
     def edition_label(self) -> str:
@@ -91,7 +89,7 @@ def load_meta(pdf: Path, root: Path) -> DocMeta:
     if not m:
         raise MetaError(f"{side.name}: edition must look like 2026-01")
     return DocMeta(pdf, pdf.relative_to(root).as_posix(), doc_type, sorted(discs),
-                   int(m.group(1)), int(m.group(2)), 1, pdf.stem)
+                   int(m.group(1)), int(m.group(2)))
 
 
 def scan(root: Path) -> tuple:

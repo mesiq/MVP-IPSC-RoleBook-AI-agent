@@ -1,5 +1,4 @@
-﻿"""PDF text extraction (line level, with geometry) and chunking."""
-import json
+"""PDF text extraction (line level, with geometry) and chunking."""
 import re
 from dataclasses import dataclass, field
 
@@ -297,9 +296,6 @@ def _scope_disciplines(scope: str) -> list:
         return []
     return detect_disciplines(scope)
 
-
-def chunks_to_json(c: Chunk) -> str:
-    return json.dumps(c.meta)
 
 
 
